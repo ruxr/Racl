@@ -65,7 +65,7 @@ BEGIN {
 	fmt =	" " fmt ".* " fmt	# формат разбора правила ACL
 	head = 2	# начальные правила ACL
 	ip = 3		# двоичный IP адрес
-	lan = 8		# признак принадлежности к ЛВС
+	lan = 8		# объект ЛВС(0), внешний(1), внешний из адресов ЛВС(2)
 	mask = 4	# реверсная маска
 	mid =	"& ALIGN=center"	# центрирование
 	num = 1		# №
@@ -124,7 +124,7 @@ BEGIN {
 	# Obj[OBJ][dst][OBJ] = ACL	- объекты-реципиенты
 	# Obj[OBJ][cfg] = CFG		- регистрационные данные
 	# Obj[OBJ][acl] = ACL		- ACL-владелец
-	# Obj[OBJ][lan] 		- объект ЛВС?
+	# Obj[OBJ][lan]			- тип объекта
 	# Ord[ORD] = DESC	- массив обоснований
 	# Rec[REC]		- массив правил доступа
 	# Rec[REC][num] = №	- номер обоснования
@@ -264,11 +264,11 @@ function chkLan() {
 				ErrD("не принадлежит известным сетям")
 			else if(i == Obj[n][ip])
 				ErrD("совпадает с адресом сети")
-			else if(!Obj[n][lan])
+			else if(Obj[n][lan])
 				ErrD("не принадлежит локальной сети")
 			else if(!(d in D)) ErrV(d, "у МСЭ нет ACL")
 			n = Dev[d][d]
-			Obj[d][lan] = Obj[n][lan] = 1
+			Obj[d][lan] = Obj[n][lan]
 			Obj[d][dst][n] = Obj[n][dst][n]
 			delete Dev[d]
 		}
@@ -286,9 +286,15 @@ function chkLan() {
 			and(Obj[i][ip], Obj[n][mask]) == Obj[n][ip])
 				Obj[n][src][i] = Net[i]
 	g = "*"
-	for(n in Net) if(Obj[n][lan])
-		if(a = Net[n]) Obj[g][src][n] = Obj[g][dst][n] = a
-		else Obj[g][dst][n]
+	for(n in Net)
+		if(Obj[n][lan]) {
+			for(i in N) if(Obj[n][mask] > Obj[i = N[i]][mask] &&
+				and(Obj[n][ip], Obj[i][mask]) == Obj[i][ip])
+				{ if(!Obj[i][lan]) Obj[n][lan] = 2; break }
+		} else {
+			if(a = Net[n]) Obj[g][src][n] = Obj[g][dst][n] = a
+			else Obj[g][dst][n]
+		}
 	for(n in Obj[g][dst]) for(i in Obj[g][dst])
 		if(Obj[i][mask] < Obj[n][mask] &&
 			and(Obj[n][ip], Obj[i][mask]) == Obj[i][ip])
@@ -303,7 +309,7 @@ function doAcl() {
 	if(!(a = getName($2, t)) || isReg(a) || !(d = getName($3, n = "МСЭ")) ||
 		!isReg(d, n) || !Trim(3, t)) return
 	Obj[a][desc] = $0
-	Obj[a][lan] = i == "acl"
+	Obj[a][lan] = i == "ACL"
 	for(n in Dev[d]) Acl[a][dev][n] = a
 }
 function doAdd(S, n) {
@@ -312,12 +318,12 @@ function doAdd(S, n) {
 	for(i in Net)
 		if(S[mask] < Obj[i][mask]) {
 			if(and(Obj[i][ip], S[mask]) == S[ip])
-				if(Obj[i][lan])
+				if(!Obj[i][lan])
 					return ErrN(i, "локальная подсеть")
 				else if(i != any)
 					return ErrN(i, "внешняя подсеть")
 		} else if(and(S[ip], Obj[i][mask]) == Obj[i][ip])
-			if(Net[i] && Obj[i][lan])
+			if(Net[i] && !Obj[i][lan])
 				return ErrN(i, "локальная сеть")
 			else if(!n || Obj[n][mask] < Obj[i][mask]) n = i
 	if($3 == "-") a = ""
@@ -326,15 +332,15 @@ function doAdd(S, n) {
 	if(!Trim(3, t)) return
 	if(S[obj] == any)
 		if(!a) return ErrA("блоком локальных сетей")
-		else if(Obj[a][lan]) return ErrA("локальной сетью")
-	if(!a && n && Net[n] && Obj[Net[n]][lan])
+		else if(!Obj[a][lan]) return ErrA("локальной сетью")
+	if(!a && n && Net[n] && !Obj[Net[n]][lan])
 		return ErrN(n, "блок локальных сетей")
 	addObj(n = S[obj], $0, S[ip], S[mask], S[cfg], Net[n] = a)
 	if(a) {
 		Obj[n][dst][n] = Obj[n][src][n] =\
 		Obj[a][dst][n] = Obj[a][src][n] = a
 		Obj[n][lan] = Obj[a][lan]
-	} else { Obj[n][dst][n]; Obj[n][lan] = 1 }
+	} else Obj[n][dst][n] = Obj[n][lan]
 }
 function doDef(S) {
 	if(!getIP($2, S, t = "сетевого объекта") || !Trim(2, t)) return
@@ -359,7 +365,7 @@ function doDev(S) {
 }
 function doGrp(G, S, I, R, r) {
 	if(!(g = getName($2, "группы")) || isReg(g)) return
-	f = $1 == "grp"
+	f = $1 == "GRP"
 	for(i = 2; i++ < NF;) {
 		if($i == "-")
 			if(r) return ErrV(g, "флаг удаления объектов уже задан")
@@ -379,8 +385,10 @@ function doGrp(G, S, I, R, r) {
 		if(s) return ErrV($i, "уже применялся в \"" g "\"")
 	}
 	if(r && !isarray(G[r])) return ErrV(g, "отсутствуют объекты удаления")
-	for(n in I) if(Obj[n][lan] == f) Obj[g][src][n] = I[n]
-	for(n in R) if(Obj[n][lan] == f) Obj[g][dst][n] = R[n]
+	for(n in I) if(!(Obj[n][lan] || f) || (Obj[n][lan] && f))
+		Obj[g][src][n] = I[n]
+	for(n in R) if(!(Obj[n][lan] || f) || (Obj[n][lan] && f))
+		 Obj[g][dst][n] = R[n]
 	if(g in Obj) return
 	ErrV(g, "группа не содержит объектов")
 }
@@ -396,7 +404,7 @@ function doObj(S, f, t, s){
 	else return
 	t = s; for(n in Obj[s][src]) if(t && t != Obj[n][acl])
 		if(t == s) t = Obj[n][acl]; else t = ""
-	if(!(Obj[s][acl] = t) || Obj[t][lan]) Obj[s][lan] = 1
+	if(!(Obj[s][acl] = t) || !Obj[t][lan]) Obj[s][lan]
 	return 1
 }
 function doRec(e, l, S, D, I, R) {
@@ -416,20 +424,18 @@ function doRec(e, l, S, D, I, R) {
 	for(i in I) for(r in R) {
 		f = $1 " " $2 " " i S[port] " " r D[port]
 		if(f in Rec) return ErrV(f, "уже есть")
-		if((a = I[i]) == (b = R[r])) continue
-		else if(!(a || b) || (a && Obj[a][lan] && !b) ||
-			(Obj[a][lan] && Obj[b][lan]))
-			n = $1 == "deny" ? tail : body
-		else if($1 != "deny") {
-			n = tail; doRecBlk()
-		} else n = body
+		if((a = I[i]) == R[r]) continue
+		s = Obj[i][lan]; d = Obj[r][lan]
+		if((s && d) || !(s || d)) n = $1 == "deny" ? tail : body
+		else if($1 == "deny") n = body
+		else if((n = s == 2 ? head : tail) == tail) doRecBlk()
 		addRec(Acl[a][n], f, txt, cur, l)
 	}
 	if(e) for(r in R) if(a = R[r])
 		{ addRec(Acl[a][body], "evaluate " e, auto, 1); doRecBlk() }
 }
 function doRecBlk() {
-	if(!a || (a && Obj[a][lan])) {
+	if(!Obj[a][lan]) {
 		for(b in Obj[a][dst]) for(s in Obj["*"][dst])
 			if(s != i) addRec(Acl[a][tail], dip b " " s, bnet, 1)
 		return
@@ -577,7 +583,7 @@ function outHtm() {
 	print "</TABLE>\n<H3>2. Используемые ACL" tab\
 		"<TH>ACL<TH>Тип<TH>МСЭ<TH>Сеть<TH>Описание ACL" >htm
 	for(a in A) print "<TR><TD ALIGN=center>" a "<TD>" Ref(a = A[a]) "<TD>"\
-		(Obj[a][lan] ? "inside" : "outside") Lst(Acl[a][dev])\
+		(Obj[a][lan] ? "outside" : "inside") Lst(Acl[a][dev])\
 		Lst(Obj[a][src], cfg) "<TD>" Htm(Obj[a][desc]) >htm
 	print "</TABLE><H3>3. Используемые сетевые объекты" tab\
 		"<TH>IP адрес<TH>ACL<TH>Описание" >htm
