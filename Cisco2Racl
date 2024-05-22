@@ -1,0 +1,55 @@
+#!/bin/sh
+H="Скрипт выборки ACL из конфигурации Cisco и конвертация их в формат Racl
+
+	@(#) Cisco2Racl V3.0 © 2024 by Roman Oreshnikov
+
+	Это бесплатное ПО поставляется без каких-либо ГАРАНТИЙ
+
+Использование: Cisco2Racl [параметр] файл
+
+Параметры:
+  -h      Вывод этого текста
+
+Аргументы:
+  файл конфигурации Cisco
+
+Сообщать об ошибках <r.oreshnikov@gmail.com>"
+End() { echo "${1:+Cisco2Racl: }${*# }" >&2; exit 1; }
+while getopts h P; do
+	case $P in
+	h) echo "$H"; exit;;
+	?) End "" "'Cisco2Racl -h' для дополнительной информации"
+	esac
+done
+[ $# = 0 ] && End "Отсутствует входной файл!"
+[ -f "$1" -a -r "$1" ] || End "Файл '$1' недоступен!"
+gawk '
+BEGIN {
+	acl = "ip access-list extended [a-zA-Z]([a-zA-Z0-9-]?[a-zA-Z0-9])*"
+	W["ftp-data"] = 20
+	W["ftp"] = 21
+	W["telnet"] = 23
+	W["smtp"] = 25
+	W["tacacs"] = 49
+	W["domain"] = 53
+	W["www"] = 80
+	W["pop3"] = 110
+	W["ident"] = 113
+	W["ntp"] = 123
+	W["netbios-ns"] = 137
+	W["snmp"] = 161
+	W["snmptrap"] = 162
+	W["isakmp"] = 500
+	W["lpd"] = 515
+}
+BEGINFILE { f = FILENAME; sub(/^.*\//, "", f); sub(/\..*/, "", f) }
+{
+	if(i && $0 ~ /^\s*(permit|deny|evaluate)\s+/) {
+		for(w = 0; w++ < NF;) if($w in W) $w = W[$w]
+		sub(/^\s+/, ""); gsub(/\s+/, " "); sub(/\s+$/, "")
+		A[n][++i] = $0
+	} else if($0 ~ acl) {
+		$4 = f "/" $4; A[n = $4][i = 1] = $0
+	} else i = 0
+}
+END { asorti(A, a); for(n in a) for(i in A[a[n]]) print A[a[n]][i] }' "$1"

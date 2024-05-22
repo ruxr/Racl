@@ -1,0 +1,609 @@
+#!/bin/sh
+ID='@(#) Racl V3.0 © 2024 by Roman Oreshnikov'
+H='Скрипт автоматизации ведения ACL
+
+	'$ID'
+
+	Это бесплатное ПО поставляется без каких-либо ГАРАНТИЙ
+
+Использование: Racl [параметр]... файл...
+
+Параметр:
+  -h      Вывод этого текста
+  -n      Не выводить построенные ACL
+  -l LST  Имя файла для записи списка МСЭ
+  -o      Выполнить оптимизацию ACL
+  -r HTM  Имя файла для записи HTML-отчёта
+
+Аргумент:
+  файл[ы] описания сетевой инфраструктуры и правил доступа
+
+Сообщать об ошибках <r.oreshnikov@gmail.com>'
+End() { echo "${1:+Racl: }${*# }" >&2; exit 1; }
+Chk() {
+	[ -z "$1" ] || End "Параметр -$P уже задан${2:+ как '$1'!}"
+	[ $# = 2 ] || case ${2:-/$OPTARG/} in
+	//|*/-*|*/./|*/../|/*//*|*[!0-9A-Za-z.\/_-]*)
+		End "Недопустимое значение для ключа '$P'!"
+	esac
+}
+RACL_N=
+RACL_L=
+RACL_O=
+RACL_R=
+while getopts hnl:or: P; do
+	case $P in
+	h) echo "$H"; exit;;
+	n) Chk "$RACL_N" ""; RACL_N=y;;
+	l) Chk "$RACL_L" $RACL_L; RACL_L=$OPTARG;;
+	o) Chk "$RACL_O" ""; RACL_O=y;;
+	r) Chk "$RACL_R" $RACL_R; RACL_R=$OPTARG;;
+	?) End "" "'Racl -h' для дополнительной информации"
+	esac
+done
+shift $(($OPTIND - 1))
+[ $# = 0 ] && End "Отсутствует входной файл!"
+for P do [ -f "$P" -a -r "$P" ] || End "Файл '$P' недоступен!"; done
+gawk -vid="$ID" -vno="$RACL_N" -vlst="$RACL_L" -vopt="$RACL_O" -vhtm="$RACL_R" '
+BEGIN {
+	### Константы и индексы в массивах
+	acl = 7		# ACL
+	any = "any"	# суперсеть 0/0
+	auto =	"Автоматическое правило"
+	bip =	"Запрет доступа с зарезервированных адресов"
+	blan =	"Запрет доступа с локальными адресами"
+	bnet =	"Запрет доступа к локальным адресам"
+	body = 3	# основные правила ACL
+	cfg = 6		# данные конфигурации
+	desc = 2	# описание
+	dev = 1		# МСЭ
+	dip =	"deny ip "
+	dst = 5		# приемник в правиле ACL
+	ext = 3		# расширение правила ACL
+	fin = 0		# финальный список правил
+	fmt =	"(any|(host|[0-9]+(.[0-9]+){3}) [0-9]+(.[0-9]+){3})"
+	fmt =	" " fmt ".* " fmt	# формат разбора правила ACL
+	head = 2	# начальные правила ACL
+	ip = 3		# двоичный IP адрес
+	lan = 8		# признак принадлежности к ЛВС
+	mask = 4	# реверсная маска
+	mid =	"& ALIGN=center"	# центрирование
+	num = 1		# №
+	obj = 1		# объект
+	out = "/dev/stderr"
+	port = 2	# выбор порта в правиле ACL
+	src = 1		# источник в правиле ACL
+	tab =	"</H3>\n<TABLE BORDER=1 CELLSPACING=0>\n<TR><TH>№<BR>п/п"
+	tail = 4	# завершающие правила ACL
+	### Переменные
+	# cur		- текущий № обоснования
+	# err		- счетчик ошибок
+	# hdr		- заголовок отчёта
+	# htm		- имя HTML-файла отчета
+	# lst		- имя файла списка МСЭ
+	max = 25	# количество ошибок до аварийного завершения
+	# no		- запрет вывода построенных ACL
+	# ord		- текущее обоснованиe
+	# opt		- оптимизация ACL
+	# txt		- текущее описание для последующих инструкций
+	### Массивы
+	# Acl[ACL]		- массив ACL
+	# Acl[ACL][dev][DEV]	- МСЭ применяющие ACL
+	# Acl[ACL][head][REC]	- начальные правила доступа
+	# Acl[ACL][body][REC]	- правила доступа
+	# Acl[ACL][tail][REC]	- завершающие правила доступа
+	# Acl[ACL][fin][№] = RULE - итоговый список правил
+	# Bad[NAME]		- массив зарезервированных имен
+	Bad[any]
+	Bad["eq"]
+	Bad["gt"]
+	Bad["lt"]
+	Bad["neg"]
+	Bad["range"]
+	Bad["established"]
+	Bad["reflect"]
+	Bad["evaluate"]
+	Bad["log"]
+	Bad["packet-too-big"]
+	Bad["ttl-exceeded"]
+	Bad["unreachable"]
+	Bad["echo-reply"]
+	Bad["echo"]
+	# Bip[OBJ]		- массив "плохих" IP
+	Bip["host 0.0.0.0"]
+	Bip["host 255.255.255.255"]
+	# Dev[DEV][DEV] = OBJ	- массив МСЭ
+	# N[№] = NET		- массив сетей в порядке реверсной маски
+	# Net[NET] = ACL	- массив используемых сетей
+	# Num[№] = ORD		- массив № обоснований
+	# Obj[OBJ]		- массив сетевых объектов
+	# Obj[OBJ][src][OBJ] = ACL	- объекты-инициаторы
+	# Obj[OBJ][desc] = DESC		- описание
+	# Obj[OBJ][ip] = IP		- IP адрес
+	# Obj[OBJ][mask] = MASK		- реверсная маска сети
+	# Obj[OBJ][dst][OBJ] = ACL	- объекты-реципиенты
+	# Obj[OBJ][cfg] = CFG		- регистрационные данные
+	# Obj[OBJ][acl] = ACL		- ACL-владелец
+	# Obj[OBJ][lan] 		- объект ЛВС?
+	# Ord[ORD] = DESC	- массив обоснований
+	# Rec[REC]		- массив правил доступа
+	# Rec[REC][num] = №	- номер обоснования
+	# Rec[REC][desc] = DESC	- описание правила
+	# Rec[REC][ext]		- расширение правила
+	# Use[PROTOCOL]		- массив поддерживаемых протоколов
+	Use["ip"]
+	Use["icmp"]
+	Use["tcp"]
+	Use["udp"]
+	Use["eigrp"]
+	Use["ospf"]
+	Say("Чтение исходных данных")
+}
+/^\s*(#.*)*$/ { next }
+{
+	while(sub(/\\+\s*$/, "")) { s = $0; getline; $0 = s " " $0 }
+	sub(/^\s+/, ""); gsub(/\s+/, " "); sub(/\s+$/, "")
+	switch($1) {
+	case "permit":
+	case "deny":	ord = chkLan(); doRec(); next
+	case ";":	ord = chkLan()
+			txt = Trim(1, "для правил доступа") ? $0 : ""; next
+	case "def":	ord = chkLan(); doDef(); next
+	case "grp":
+	case "GRP":	ord = chkLan(); doGrp(); next
+	case "add":	if(Allow(t = "сетевой объект")) doAdd(); next
+	case "acl":
+	case "ACL":	if(Allow(t = "ACL")) doAcl(); next
+	case "dev":
+	case "DEV":	if(Allow(t = "МСЭ")) doDev(); next
+	case "new":	if(NF == 1) { ErrV($1, "отсутствует значение"); next }
+			sub(/new /, "")
+			if(!(cur || hdr || isarray(Dev))) { hdr = $0; next }
+	}
+	txt = chkLan()
+	if(ord != "") { Ord[ord] = Ord[ord] "\n" $0; next }
+	if(cur in Num) cur++
+	if($0 in Ord) Err("Обоснование уже зарегистрировано")
+	else Ord[Num[cur] = ord = $0]
+}
+END {
+	if(err > max) End("Слишком много ошибок в исходных данных")
+	if(err) End("Некорректные исходные данные")
+	if(!isarray(Rec)) End("Отсутствуют правила доступа")
+	finAcl()
+	if(opt) { Say("Оптимизация ACL"); optAcl() }
+	if(lst != "") { Say("Вывод списка МСЭ"); outDev() }
+	if(htm != "") { Say("Вывод HTML-отчета"); outHtm() }
+	if(!no) { Say("Вывод построенных ACL"); outAcl() }
+	Say("Успешное завершение работы")
+}
+function Acl2Htm(i, S) {
+	delete H
+	if(fin in Acl[A[a]]) for(n in Acl[A[a]][fin]) {
+		if(!match(r = Acl[A[a]][fin][n], fmt, S)) s = d = any
+		else { s = S[src]; d = S[dst] }
+		H[++i][1] = s != any && Obj[s][desc] ? Htm(Obj[s][desc]) : s
+		H[i][2] = d != any && Obj[d][desc] ? Htm(Obj[d][desc]) : d
+		H[i][3] = r; sub(/ (log|reflect .*)$/, "", r)
+		H[i][4] = Htm(Rec[r][desc])
+		H[i][5] = Ref(Rec[r][num], "_")
+	}
+	if(1 in H) for(n = 0; n++ < 5;) { Pack(n); if(n == 2) n++ }
+}
+function Allow(s, f) {
+	switch(s) {
+	case "МСЭ":		if(isarray(Acl)) f = 1
+	case "ACL":		if(isarray(Net)) f = 1
+	case "сетевой объект":	if(isarray(N)) { f = 1; s = "сетевого объекта" }
+	}
+	return f ? Err("Регистрация " s " запрещена") : 1
+}
+function End(s) { Say("! " s); exit 1 }
+function Err(s) { print FILENAME "[" FNR "]: " s >out; if(++err > max) exit 1 }
+function ErrA(s) { ErrV($2, "не может быть " s) }
+function ErrD(s) { ErrV(Obj[d][cfg], "IP адрес МСЭ \"" d "\" " s) }
+function ErrN(n, s) { ErrV($2, "есть " s " \"" Obj[n][cfg] "\"") }
+function ErrV(v, s) { Err("\"" v "\" - " s) }
+function Htm(s) {
+	sub(/^\s+/, "", s); gsub(/&/, "\\&amp;", s); gsub(/</, "\\&lt;", s)
+	gsub(/>/, "\\&gt;", s); gsub(/\n|\\n/, "<BR>", s)
+	return s
+}
+function Lst(S, f, L, l, s) {
+	if(f != cfg) asorti(S, L)
+	else { for(l in S) L[l] = Obj[l][f]; asort(L, L, "by_ip"); f = 0 }
+	for(l in L) { l = f ? Ref(L[l]) : L[l]; s = s ? s "<BR>" l : l }
+	return "<TD>" s
+}
+function Pack(n, c) {
+	t = H[p = 1][n]
+	for(i in H)
+		if(H[i][n] != t) {
+			H[p][n] = "<TD" (c > 1 ? " ROWSPAN=" c : "") ">" H[p][n]
+			t = H[p = i][n]; c = 1
+		} else if(c++) delete H[i][n]
+	H[p][n] = "<TD" (c > 1 ? " ROWSPAN=" c : "") ">" H[p][n]
+}
+function Ref(s, p) { return "<A HREF=#" p s ">" s "</A>" }
+function Say(s) { print "Racl: " s >out }
+function Trim(i, s) {
+	sub("^(\\s*\\S+){" i "}\\s*", "")
+	return $0 == "" ? Err("Отсутствует описание " s) : 1
+}
+function addObj(n, d, i, m, c, a) {
+	Obj[n][desc] = d; Obj[n][ip] = i; Obj[n][mask] = m
+	Obj[n][cfg] = c; Obj[n][acl] = a
+}
+function addRec(A, r, t, n, e) {
+	A[r]; Rec[r][desc] = t; Rec[r][num] = n; if(e != "") Rec[r][ext] = e
+}
+function by_ip(i1, v1, i2, v2) {
+	if(Obj[i1][ip] > Obj[i2][ip]) return 1
+	if(Obj[i1][ip] < Obj[i2][ip]) return -1
+	if(Obj[i1][mask] > Obj[i2][mask]) return 1
+	if(Obj[i1][mask] < Obj[i2][mask]) return -1
+}
+function by_mask(i1, v1, i2, v2) {
+	if(Obj[i1][mask] < Obj[i2][mask]) return 1
+	if(Obj[i1][mask] > Obj[i2][mask]) return -1
+}
+function chkLan() {
+	if(isarray(N)) return
+	Say("Проверка сетевой инфраструктуры")
+	asorti(Net, N, "by_mask")
+	if(hdr == "") Err("Отсутствует заголовок")
+	if(!isarray(Dev)) Err("Нет зарегистрированных МСЭ")
+	else if(!isarray(Acl)) Err("Нет зарегистрированных ACL")
+	else if(!isarray(Net)) Err("Нет зарегистрированных сетей")
+	else {
+		for(a in Acl) for(d in Acl[a][dev]) D[d]
+		asorti(Dev, A)
+		for(d in A) {
+			if(!(ip in Obj[d = A[d]])) continue
+			if(!(n = getNet(i = Obj[d][ip], Obj[d][mask], 1)))
+				ErrD("не принадлежит известным сетям")
+			else if(i == Obj[n][ip])
+				ErrD("совпадает с адресом сети")
+			else if(!Obj[n][lan])
+				ErrD("не принадлежит локальной сети")
+			else if(!(d in D)) ErrV(d, "у МСЭ нет ACL")
+			n = Dev[d][d]
+			Obj[d][lan] = Obj[n][lan] = 1
+			Obj[d][dst][n] = Obj[n][dst][n]
+			delete Dev[d]
+		}
+		asorti(Acl, A)
+		for(a in A) if(!(src in Obj[a = A[a]]))
+			ErrV(a, "нет сетей обслуживаемых ACL")
+	}
+	if(err) exit
+	asorti(D)
+	for(d in Dev) for(n in Dev[d])
+		Obj[d][dst][Dev[d][n]] = Obj[n][dst][Dev[d][n]]
+	delete Dev
+	for(n in Net) if(!Net[n]) for(i in Net)
+		if(i != any && Net[i] && Obj[i][mask] > Obj[n][mask] &&
+			and(Obj[i][ip], Obj[n][mask]) == Obj[n][ip])
+				Obj[n][src][i] = Net[i]
+	g = "*"
+	for(n in Net) if(Obj[n][lan])
+		if(a = Net[n]) Obj[g][src][n] = Obj[g][dst][n] = a
+		else Obj[g][dst][n]
+	for(n in Obj[g][dst]) for(i in Obj[g][dst])
+		if(Obj[i][mask] < Obj[n][mask] &&
+			and(Obj[n][ip], Obj[i][mask]) == Obj[i][ip])
+				{ delete Obj[g][dst][n]; break }
+	if(any in Net) Obj[any][src][any] = Obj[any][dst][any] = Net[any]
+	else Obj[any][dst][any]
+	Ord[Num[cur = 1] = "Алгоритм Racl"] = "ACL-правила построенные"\
+	" по результатам анализа заданных взаимодействий алгоритмом Racl"
+}
+function doAcl() {
+	i = $1
+	if(!(a = getName($2, t)) || isReg(a) || !(d = getName($3, n = "МСЭ")) ||
+		!isReg(d, n) || !Trim(3, t)) return
+	Obj[a][desc] = $0
+	Obj[a][lan] = i == "acl"
+	for(n in Dev[d]) Acl[a][dev][n] = a
+}
+function doAdd(S, n) {
+	if(!getIP($2, S, t)) return
+	if(S[obj] in Obj) return ErrV($2, t " уже зарегистрирован")
+	for(i in Net)
+		if(S[mask] < Obj[i][mask]) {
+			if(and(Obj[i][ip], S[mask]) == S[ip])
+				if(Obj[i][lan])
+					return ErrN(i, "локальная подсеть")
+				else if(i != any)
+					return ErrN(i, "внешняя подсеть")
+		} else if(and(S[ip], Obj[i][mask]) == Obj[i][ip])
+			if(Net[i] && Obj[i][lan])
+				return ErrN(i, "локальная сеть")
+			else if(!n || Obj[n][mask] < Obj[i][mask]) n = i
+	if($3 == "-") a = ""
+	else if(!(a = getName($3, "ACL"))) return
+	else if(!(a in Acl)) return ErrV(a, "ACL не зарегистрирован")
+	if(!Trim(3, t)) return
+	if(S[obj] == any)
+		if(!a) return ErrA("блоком локальных сетей")
+		else if(Obj[a][lan]) return ErrA("локальной сетью")
+	if(!a && n && Net[n] && Obj[Net[n]][lan])
+		return ErrN(n, "блок локальных сетей")
+	addObj(n = S[obj], $0, S[ip], S[mask], S[cfg], Net[n] = a)
+	if(a) {
+		Obj[n][dst][n] = Obj[n][src][n] =\
+		Obj[a][dst][n] = Obj[a][src][n] = a
+		Obj[n][lan] = Obj[a][lan]
+	} else { Obj[n][dst][n]; Obj[n][lan] = 1 }
+}
+function doDef(S) {
+	if(!getIP($2, S, t = "сетевого объекта") || !Trim(2, t)) return
+	if(!(S[obj] in Obj)) doObj(S, 1, $0)
+	else if(Obj[S[obj]][desc] == "") Obj[S[obj]][desc] = $0
+	else ErrV(S[cfg], "описание " t " уже задано")
+}
+function doDev(S) {
+	if(!(d = getName($2, t)) || isReg(d)) return
+	if($1 == "dev") {
+		if(!(n = getIP($3, S, t, 4))) return
+		if(S[obj] in Obj) return ErrV($2, "IP адрес \"" $3 "\" занят")
+		if(!Trim(3, t)) return
+		addObj(Dev[d][d] = S[obj], $0, S[ip], S[mask], S[cfg])
+		return addObj(d, $0, S[ip], S[mask], S[cfg])
+	}
+	for(i = 2; i++ < NF;)
+		if(!(n = getName($i, t)) || !isReg(n, t)) return
+		else for(s in Dev[n]) S[s] = Dev[n][s]
+	if(isarray(S)) { Obj[d]; for(n in S) Dev[d][n] = S[n] }
+	else ErrV(d, "пустой список " t)
+}
+function doGrp(G, S, I, R, r) {
+	if(!(g = getName($2, "группы")) || isReg(g)) return
+	f = $1 == "grp"
+	for(i = 2; i++ < NF;) {
+		if($i == "-")
+			if(r) return ErrV(g, "флаг удаления объектов уже задан")
+			else if(isarray(G)) { r = 1; continue }
+			else return ErrV(g, "удаление из пустого списка")
+		if($i ~ /[a-zA-Z*]/) s = $i
+		else if(getIP($i, S, n = "объекта") && doObj(S, 1)) s = S[obj]
+		else return
+		if(!(s in Obj)) return ErrV($i, "неизвестная группа")
+		if(s == any) return ErrV($i, "недопустимое использование")
+		delete S
+		for(n in Obj[s][src])
+			{ S[n]; if(r) delete I[n]; else I[n] = Obj[s][src][n] }
+		for(n in Obj[s][dst])
+			{ S[n]; if(r) delete R[n]; else R[n] = Obj[s][dst][n] }
+		for(n in S) if(!(n in G[r])) G[r][n] = s = 0
+		if(s) return ErrV($i, "уже применялся в \"" g "\"")
+	}
+	if(r && !isarray(G[r])) return ErrV(g, "отсутствуют объекты удаления")
+	for(n in I) if(Obj[n][lan] == f) Obj[g][src][n] = I[n]
+	for(n in R) if(Obj[n][lan] == f) Obj[g][dst][n] = R[n]
+	if(g in Obj) return
+	ErrV(g, "группа не содержит объектов")
+}
+function doObj(S, f, t, s){
+	if((s = S[obj]) in Obj) return 1
+	for(n in N) if(S[mask] < Obj[n = N[n]][mask] &&
+		and(Obj[n][ip], S[mask]) == S[ip])
+			if(Net[n]) Obj[s][src][n] = Net[n]
+	if(!(s in Obj) && (n = getNet(S[ip], S[mask], a)))
+		Obj[s][dst][s] = Obj[s][src][s] = Net[n]
+	if(s in Obj) { addObj(s, t, S[ip], S[mask], S[cfg]); Obj[s][dst][s] }
+	else if(f) return ErrV(S[cfg], "отсутствует подходящая сеть")
+	else return
+	t = s; for(n in Obj[s][src]) if(t && t != Obj[n][acl])
+		if(t == s) t = Obj[n][acl]; else t = ""
+	if(!(Obj[s][acl] = t) || Obj[t][lan]) Obj[s][lan] = 1
+	return 1
+}
+function doRec(e, l, S, D, I, R) {
+	if(cur == 1) return Err("Обоснование не задано")
+	if($2 == "") return Err("Протокол не указан")
+	if(!($2 in Use)) return ErrV($2, "неподдерживаемый протокол")
+	if(!getObj($3, "источника", I) || !(f = getPort(4, S))) return
+	if(!getObj($f, "приёмника", R, 1) || !(f = getPort(++f, D))) return
+	if($f == "reflect")
+		if($1 == "deny")
+			return ErrV($f, "не может использоваться с \"" $1 "\"")
+		else if(!(e = getName($(f + 1), "для " $f))) return
+		else if(e in Acl) return ErrV(e, $f " имя уже присвоено ACL")
+		else l = " " $(f++) " " $(f++)
+	if($f == "log") l = l " " $(f++)
+	if($f != "") return ErrV($f, "не распознанное поле правила доступа")
+	for(i in I) for(r in R) {
+		f = $1 " " $2 " " i S[port] " " r D[port]
+		if(f in Rec) return ErrV(f, "уже есть")
+		if((a = I[i]) == (b = R[r])) continue
+		else if(!(a || b) || (a && Obj[a][lan] && !b) ||
+			(Obj[a][lan] && Obj[b][lan]))
+			n = $1 == "deny" ? tail : body
+		else if($1 != "deny") {
+			n = tail; doRecBlk()
+		} else n = body
+		addRec(Acl[a][n], f, txt, cur, l)
+	}
+	if(e) for(r in R) if(a = R[r])
+		{ addRec(Acl[a][body], "evaluate " e, auto, 1); doRecBlk() }
+}
+function doRecBlk() {
+	if(!a || (a && Obj[a][lan])) {
+		for(b in Obj[a][dst]) for(s in Obj["*"][dst])
+			if(s != i) addRec(Acl[a][tail], dip b " " s, bnet, 1)
+		return
+	}
+	for(b in Obj["*"][dst]) addRec(Acl[a][body], dip b " any", blan, 1)
+	if(i == any) for(b in Bip) addRec(Acl[a][body], dip b " any", bip, 1)
+}
+function getIP(s, S, t, n, A, i, m) {
+	if(s == any && !n) {
+		S[obj] = s; S[ip] = S[mask] = 0; return S[cfg] = "0/0"
+	}
+	if((m = split(s, A, "/")) == 1) n = 4
+	else if(!m) return Err("IP адрес " t " не задан")
+	if(m > 2 || (i = isIP(A[1], n)) == "")
+		return ErrV(s, "недопустимый IP адрес " t)
+	if(n == 4) m = 0
+	else if(A[2] !~ /^([12]?[0-9]|3[0-2])$/)
+		return ErrV(s, "недопустимая маска сети")
+	else if(and(i, m = rshift(0xffffffff, A[2])))
+		return ErrV(s, "маска сети должна быть больше")
+	S[ip] = i
+	if(!m) {
+		S[obj] = "host " int2IP(i); S[mask] = 0xffffffff
+		if(S[obj] in Bip) return ErrV(s, "недопустимый IP адрес " t)
+	} else if(m == 0xffffffff) { S[obj] = any; S[mask] = 0 }
+	else { S[obj] = int2IP(i) " " int2IP(m); S[mask] = xor(0xffffffff, m) }
+	return S[cfg] = s
+}
+function getName(s, t) {
+	if(s == "") Err("Отсутствует имя " t)
+	else if(s !~ /^[a-zA-Z]([a-zA-Z0-9_-]?[a-zA-Z0-9])*$/)
+		ErrV(s, "недопустимое имя " t)
+	else if(s in Bad) ErrV(s, "зарезервированное имя")
+	else return s
+}
+function getNet(i, m, a, n) {
+	for(n in N) if(m >= Obj[n = N[n]][mask] &&
+		and(i, Obj[n][mask]) == Obj[n][ip]) if(a || Net[n]) return n
+}
+function getObj(s, t, R, a, S) {
+	if(!(s ~ /[a-zA-Z*]/))
+		if(getIP(s, S, t)) { doObj(S); s = S[obj] } else return
+	if(!(s in Obj))
+		if(s ~ / /) doObj(S)
+		else return ErrV(s, "группа " t " не зарегистрирована")
+	if(s in Obj)
+		if(a) for(n in Obj[s][dst]) R[n] = Obj[s][dst][n]
+		else for(n in Obj[s][src]) R[n] = Obj[s][src][n]
+	return isarray(R) ? 1 : ErrV(S[cfg] == "" ? s : S[cfg],
+		"отсутствует подходящ" (a ? "ая сеть" : "ий ACL") " для " t)
+}
+function getPort(i, S) {
+	if($i == "") return i
+	if($2 == "icmp" && i == 5)
+		switch($i) {
+		case "packet-too-big":
+		case "ttl-exceeded":
+		case "unreachable":
+		case "echo-reply":
+		case "echo":	S[port] = " " $i; return ++i
+		}
+	switch($i) {
+	case "eq":
+	case "gt":
+	case "lt":
+	case "neg":
+		if($2 == "ip")
+		return Err("Выбор порта не поддерживается протоколом")
+		S[port] = " " $i " " $(i + 1)
+		if(isU16($(i + 1))) return i + 2; return
+	case "range":
+		if($2 == "ip")
+		return Err("Диапазон портов не поддерживается протоколом")
+		S[port] = " " $i " " $(i + 1) " " $(i + 2)
+		if(!isU16($(i + 1)) || !isU16($(i + 2))) return
+		if($(i + 1) < $(i + 2)) return i + 3
+		return ErrV($(++i) " " $(++i), "недопустимый диапазон портов")
+	case "established":
+		S[port] = " " $i
+		if($2 == "tcp" && i == 5) return ++i
+		return ErrV($i, "недопустимое использование")
+	}
+	return i
+}
+function endAcl(s, R) {
+	if(!(s in Acl[d = A[a]])) return
+	asorti(Acl[d][s], R)
+	for(r in R) Acl[d][fin][++n] = R[r] Rec[R[r]][ext]
+	delete Acl[d][s]
+}
+function finAcl() {
+	for(a in A) { n = 0; endAcl(head); endAcl(body); endAcl(tail) }
+}
+function int2IP(i) {
+	return and(rshift(i, 24), 255) "." and(rshift(i, 16), 255) "."\
+		and(rshift(i, 8), 255) "." and(i, 255)
+}
+function isIP(i, n, A) {
+	if(!(i = split(i, A, ".")) || i > 4 || i < n) return
+	while(i) if(A[i] !~ /^(0|[1-9][0-9]{,2})$/ || A[i--] > 255) return
+	return or(lshift(A[1], 24), lshift(A[2], 16), lshift(A[3], 8), A[4])
+}
+function isReg(n, t) {
+	if(n in Obj) { if(!t) ErrV(n, "имя уже зарегистрировано"); return 1 }
+	if(t) ErrV(n, "имя " t " не зарегистрировано")
+}
+function isU16(s) {
+	if(s ~ /^(0|[1-9][0-9]*)$/ && s <= 0xffff) return 1
+	else if(s == "") Err("Отсутствует значение для номера порта")
+	else ErrV(s, "недопустимое значение номера порта")
+}
+function optAcl() { for(a in Acl) if(fin in Acl[a]) optAclDeny(Acl[a][fin]) }
+function optAclDeny(L, S) {
+	for(n in L) if(n in L && L[n] ~ /^deny/) { match(L[n], fmt, S)
+		for(c in L) if(int(c) > int(n) && L[c] ~ /^deny/ &&
+			optAclR(L[c], S)) delete L[c]
+	}
+}
+function optAclR(r, S, D) {
+	match(r, fmt, D)
+	return Obj[S[src]][mask] <= Obj[D[src]][mask] &&
+		and(Obj[D[src]][ip], Obj[S[src]][mask]) == Obj[S[src]][ip] &&
+		Obj[S[dst]][mask] <= Obj[D[dst]][mask] &&
+		and(Obj[D[dst]][ip], Obj[S[dst]][mask]) == Obj[S[dst]][ip]
+}
+function outAcl() {
+	for(d in D) for(a in A) if(D[d] in Acl[a = A[a]][dev]) {
+		print "ip access-list extended " D[d] "/" a
+		for(i in Acl[a][fin]) print Acl[a][fin][i]
+	}
+}
+function outDev() { for(d in D) print D[d] " " Obj[D[d]][cfg] >lst }
+function outHtm() {
+	hdr = Htm(hdr)
+	print "<!DOCTYPE html>\n<HTML>\n<HEAD>\n<META",
+		"HTTP-EQUIV=\"Content-Type\" CONTENT=\"text/html;",
+		"charset=utf-8\"/>\n<TITLE>" hdr "</TITLE>\n<STYLE>\n"\
+		"td { padding-left: .2em; padding-right: .2em; }\n</STYLE>\n"\
+		"</HEAD>\n<BODY>\n<H2 ALIGN=CENTER>" hdr\
+		"</H2>\n<H3>1. Используемые МСЭ" tab\
+		"<TH>МСЭ<TH>IP<TH>ACL<TH>DNS имя" >htm
+	for(a in Acl) for(d in Acl[a][dev]) H[d][a]
+	for(d in D) print "<TR><TD ALIGN=center>" d "<TD>" (d = D[d]) "<TD>"\
+		Obj[d][cfg] Lst(H[d], 1) "<TD>" Htm(Obj[d][desc]) >htm
+	print "</TABLE>\n<H3>2. Используемые ACL" tab\
+		"<TH>ACL<TH>Тип<TH>МСЭ<TH>Сеть<TH>Описание ACL" >htm
+	for(a in A) print "<TR><TD ALIGN=center>" a "<TD>" Ref(a = A[a]) "<TD>"\
+		(Obj[a][lan] ? "inside" : "outside") Lst(Acl[a][dev])\
+		Lst(Obj[a][src], cfg) "<TD>" Htm(Obj[a][desc]) >htm
+	print "</TABLE><H3>3. Используемые сетевые объекты" tab\
+		"<TH>IP адрес<TH>ACL<TH>Описание" >htm
+	delete H
+	for(n in Obj) if(n ~ / |any/ && Obj[n][desc] != "") H[n]
+	asorti(H, H, "by_ip")
+	for(n in H) print "<TR><TD ALIGN=center>" n "<TD>" Obj[n = H[n]][cfg]\
+		(Obj[n][acl] ? "<TD>" Ref(Obj[n][acl]) : "<TD ALIGN=center>-")\
+		"<TD>" Htm(Obj[n][desc]) >htm
+	print "</TABLE><H3>4. Правила ACL" tab "<TH>Источник (инициатор)"\
+		"<TH>Приемник (ответчик)<TH>Правило ACL"\
+		"<TH>Назначение&nbsp;правила<TH>№<BR>осн." >htm
+	for(a in A) {
+		Acl2Htm()
+		print "<TR><TD ALIGN=center><B>" a "</B><TD COLSPAN=5 ID=" A[a]\
+			"><B>" A[a] ": " Obj[A[a]][desc] "</B>" >htm
+		for(n in H) print "<TR><TD ALIGN=center>" a "." n\
+			(1 in H[n] ? H[n][1] : "")\
+			(2 in H[n] ? H[n][2] : "")\
+			"<TD NOWRAP>" H[n][3]\
+			(4 in H[n] ? H[n][4] : "")\
+			(5 in H[n] ? gensub(/^<TD/, mid, 1, H[n][5]) : "") >htm
+	}
+	print "</TABLE><H3>5. Обоснования" tab "<TH>Название<TH>Содержание" >htm
+	for(n in Num) print "<TR><TD ALIGN=center ID=_" n ">" n "<TD>"\
+		Htm(i = Num[n]) "<TD>" Htm(Ord[i]) >htm
+	print "</TABLE>\n<P STYLE=\"text-align:center; font:italic 70%"\
+		" small-caption;\">"id"</P>\n</BODY>\n</HTML>" >htm
+}' "$@"

@@ -1,0 +1,181 @@
+#!/bin/sh
+H="Эмулятор работы с оборудованием Cisco по протоколу RSH
+
+	@(#) Rsh V3.0 © 2024 by Roman Oreshnikov
+
+	Это бесплатное ПО поставляется без каких-либо ГАРАНТИЙ
+
+Использование: Rsh [параметр] IP команда
+
+Параметры:
+  -h      Вывод этого текста
+
+Аргументы:
+  IP - IP адрес устройства Cisco
+  команда - эмулируемая команда, одна из двух:
+    show running-config
+    copy tftp://host/[path/]file running-config
+
+Сообщать об ошибках <r.oreshnikov@gmail.com>"
+End() { echo "${1:+Rsh: }${*# }" >&2; exit 1; }
+while getopts h P; do
+	case $P in
+	h) echo "$H"; exit;;
+	?) End "" "'Rsh -h' для дополнительной информации"
+	esac
+done
+[ $# = 2 ] || End "Недопустимое число входных параметров!"
+case $2 in
+"show running-config");;
+"copy tftp://"*" running-config") exit;;
+*) End "Недопустимая команда!"
+esac
+H=172.16.1.2
+case $1 in
+192.168.0.1) N=gw H=192.168.0.2;;
+192.168.1.1) N=sw-1 Vlan=1 G2=192.168.3.1;;
+192.168.1.2) N=sw-2 Vlan=2 G2=192.168.2.2 G3=192.168.4.2;;
+192.168.2.3) N=sw-3 Vlan=3 G2=192.168.5.3;;
+192.168.3.4) N=sw-4 Vlan=4 G2=192.168.6.4 G3=192.168.8.4;;
+192.168.4.5) N=sw-5 Vlan=5 G2=192.168.6.5 G3=192.168.7.5 G4=192.168.9.5;;
+192.168.5.6) N=sw-6 Vlan=6 G2=192.168.7.6 G3=192.168.10.6;;
+192.168.8.7) N=sw-7 Vlan=7 G2=192.168.11.7;;
+192.168.9.8) N=sw-8 Vlan=8 G2=192.168.11.8 G3=192.168.12.8;;
+192.168.10.9) N=sw-9 Vlan=9 G2=192.168.12.9;;
+*) End "Неизвестное устройство!"
+esac
+echo 'version 12.2
+no service pad
+no service timestamps debug uptime
+no service timestamps log uptime
+service password-encryption
+no service dhcp
+!
+hostname '$N'
+!
+boot-start-marker
+boot-end-marker
+!
+enable secret 5 $1$0123456789ABCDEF0123456789A
+!
+aaa new-model
+!
+aaa authentication login default group tacacs+ enable
+aaa authorization exec default group tacacs+ if-authenticated
+aaa accounting commands 15 default start-stop group tacacs+
+!
+aaa session-id common
+system mtu routing 1500
+ip subnet-zero
+!
+no ip domain-lookup
+!
+ip rcmd rsh-enable
+ip rcmd remote-host noc '$H' noc enable
+!
+interface GigabitEthernet0/1'
+if [ $1 != 192.168.0.1 ]; then
+echo ' ip address '$1' 255.255.255.0
+ no ip redirects
+ no ip unreachables
+ no ip proxy-arp'
+else
+echo ' ip address 1.1.1.111 255.255.255.0
+ ip access-group Inet in
+ no ip redirects
+ no ip unreachables
+ no ip proxy-arp
+ ip nat outside
+ ip virtual-reassembly'
+fi
+echo '!
+interface GigabitEthernet0/2'
+if [ $1 != 192.168.0.1 ]; then
+echo ' ip address '$G2' 255.255.255.0
+ no ip redirects
+ no ip unreachables
+ no ip proxy-arp'
+fi
+echo '!
+interface GigabitEthernet0/3'
+if [ -n "$G3" ]; then echo " ip address $G3 255.255.255.0
+ no ip redirects
+ no ip unreachables
+ no ip proxy-arp"
+fi
+echo '!
+interface GigabitEthernet0/4'
+if [ -n "$G4" ]; then echo " ip address $G4 255.255.255.0
+ no ip redirects
+ no ip unreachables
+ no ip proxy-arp"
+fi
+echo '!
+interface GigabitEthernet0/5
+!
+interface GigabitEthernet0/6
+!
+interface GigabitEthernet0/7
+!
+interface GigabitEthernet0/8
+!'
+if [ $1 != 192.168.0.1 ]; then
+echo 'interface Vlan'$Vlan'
+ ip address 172.16.'$Vlan'.1 255.255.255.0
+ ip access-group Vlan'$Vlan' in
+ no ip redirects
+ no ip unreachables
+ no ip proxy-arp
+!
+router eigrp 1
+ network 192.168.0.0 0.0.15.255
+ redistribute connected
+ no eigrp log-neighbor-changes
+ no eigrp log-neighbor-warnings
+!'
+else
+echo 'interface Vlan1
+ ip address 192.168.0.1 255.255.255.0
+ ip access-group Vlan1 in
+ no ip redirects
+ no ip unreachables
+ no ip proxy-arp
+ ip nat inside
+ ip virtual-reassembly
+!
+interface Vlan2
+ ip address 192.168.1.1 255.255.255.0
+ ip access-group Vlan2 in
+ no ip redirects
+ no ip unreachables
+ no ip proxy-arp
+ ip nat inside
+ ip virtual-reassembly
+!'
+fi
+echo 'no ip http server
+no ip http secure-server
+!'
+if [ $1 = 192.168.0.1 ]; then
+echo 'ip nat inside source list 2 interface GigabitEthernet0/1 overload
+ip nat inside source static tcp 192.168.0.5 443 1.1.1.111 443 extendable
+ip route 0.0.0.0 0.0.0.0 1.1.1.1
+!
+ip access-list extended Inet
+ip access-list extended Vlan1
+ip access-list extended Vlan2'
+else
+echo 'ip access-list extended Vlan'$Vlan
+fi
+echo '!
+logging '$H'
+access-list 1 permit '$H'
+access-list 2 permit 192.168.0.0 0.0.0.255
+tacacs-server host '$H'
+tacacs-server directed-request
+tacacs-server key 7 0123456789ABCDEF01234567
+!
+control-plane
+!
+line con 0
+line vty 5 15'

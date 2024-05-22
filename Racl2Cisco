@@ -1,0 +1,79 @@
+#!/bin/sh
+H="Скрипт конвертации ACL из формата Racl в формат загрузки конфигурации Cisco
+
+	@(#) Racl2Cisco V3.0 © 2024 by Roman Oreshnikov
+
+	Это бесплатное ПО поставляется без каких-либо ГАРАНТИЙ
+
+Использование: Racl2Cisco [параметр] src dst
+
+Параметры:
+  -d DIR  Каталог для сохранения ACL
+  -h      Вывод этого текста
+
+Аргументы:
+  src - файл Racl с текущими ACL
+  dst - файл Racl с новыми ACL
+
+Сообщать об ошибках <r.oreshnikov@gmail.com>"
+End() { echo "${1:+Racl2Cisco: }${*# }" >&2; exit 1; }
+Chk() {
+	[ -z "$1" ] || End "Параметр -$P уже задан${2:- как '$1'!}"
+	case ${2:-/$OPTARG/} in
+	//|/*//*|*[\ ]*|/-*) End "Недопустимое значение '$OPTARG' для -$P!"
+	esac
+}
+RACL_D=
+while getopts d:h P; do
+	case $P in
+	d) Chk "$RACL_D" RACL_D; RACL_D=$OPTARG;;
+	h) echo "$H"; exit;;
+	?) End "" "'Racl2Cisco -h' для дополнительной информации"
+	esac
+done
+shift $(($OPTIND - 1))
+[ $# = 2 ] || End "Неверное число входных параметров!"
+for P do [ -f "$1" -a -r "$1" ] || End "Файл '$1' недоступен!"; done
+gawk -vdir=$RACL_D '
+BEGIN { acl = "ip access-list extended .+"; if(dir == "") dir = "." }
+BEGINFILE { n = 0; f = FILENAME; if(s) d = f; else s = f }
+{
+	if(i && $0 ~ /^\s*(permit|deny|evaluate)\s+/) A[f][a][++i] = $0
+	else if($0 ~ acl) {
+		if((a = $4) in A[f]) { delete A[f][a]; n = f }
+		A[f][a][i = 1] = $0
+	} else i = 0
+}
+ENDFILE {
+	if(n) {
+		print "Racl2Cisco: Оптимизация " n >"/dev/stderr"
+		close(n)
+		asorti(A[n], L)
+		for(a in L) for(i in A[n][L[a]]) print A[n][L[a]][i] >n
+	}
+}
+END {
+	asorti(A[d], L)
+	for(a in L)
+		if((a = L[a]) in A[s]) {
+			n = 0
+			if(length(A[s][a]) != length(A[d][a])) n = 1
+			else for(i in A[s][a])
+				if(A[s][a][i] != A[d][a][i]) { n = 1; break }
+			if(n) Out(A[d][a], "изменен на МСЭ", 1)
+			delete A[s][a]
+		} else Out(A[d][a], "добавлен на МСЭ", 1)
+	asorti(A[s], L)
+	for(a in L) Out(A[s][L[a]], "удален с МСЭ")
+	for(f in F) print "end" >f
+}
+function Out(L, s, f) {
+	split(L[1], S, "[ /]")
+	print "Racl2Cisco: ACL \"" S[5] "\" " s " \"" S[4] "\"" >"/dev/stderr"
+	if(n) {
+		F[f = dir "/" S[4]]
+		sub(/[^ \/]*\//, "", L[1])
+		L[0] = "no " L[1]
+		for(i in L) print L[i] >f
+	}
+}' "$@"
