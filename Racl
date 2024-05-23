@@ -324,9 +324,10 @@ function doAdd(S, n) {
 				else if(i != any)
 					return ErrN(i, "внешняя подсеть")
 		} else if(and(S[ip], Obj[i][mask]) == Obj[i][ip])
-			if(Net[i] && !Obj[i][lan])
+			if(Net[i] && !Obj[i][lan]) {
+				if($3 == "-" && S[ip] != Obj[i][ip]) break
 				return ErrN(i, "локальная сеть")
-			else if(!n || Obj[n][mask] < Obj[i][mask]) n = i
+			} else if(!n || Obj[n][mask] < Obj[i][mask]) n = i
 	if($3 == "-") a = ""
 	else if(!(a = getName($3, "ACL"))) return
 	else if(!(a in Acl)) return ErrV(a, "ACL не зарегистрирован")
