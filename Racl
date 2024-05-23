@@ -437,8 +437,9 @@ function doRec(e, l, S, D, I, R) {
 }
 function doRecBlk() {
 	if(!Obj[a][lan]) {
-		for(b in Obj[a][dst]) for(s in Obj["*"][dst])
-			if(s != i) addRec(Acl[a][tail], dip b " " s, bnet, 1)
+		for(b in Obj[a][dst]) for(s in Obj["*"][dst]) if(s != i &&
+			 and(Obj[s][ip], Obj[r][mask]) == Obj[r][ip])
+				addRec(Acl[a][tail], dip b " " s, bnet, 1)
 		return
 	}
 	for(b in Obj["*"][dst]) addRec(Acl[a][body], dip b " any", blan, 1)
