@@ -267,9 +267,10 @@ function chkLan() {
 			else if(Obj[n][lan])
 				ErrD("не принадлежит локальной сети")
 			else if(!(d in D)) ErrV(d, "у МСЭ нет ACL")
-			n = Dev[d][d]
-			Obj[d][lan] = Obj[n][lan]
-			Obj[d][dst][n] = Obj[n][dst][n]
+			Obj[d][lan] = Obj[i = Dev[d][d]][lan]
+			if((a = Obj[n][acl]) in Acl && !(d in Acl[a][dev]))
+				Obj[d][acl] = Obj[i][acl] = a
+			Obj[d][dst][i] = Obj[i][dst][i] = Obj[i][acl]
 			delete Dev[d]
 		}
 		asorti(Acl, A)
@@ -392,19 +393,19 @@ function doGrp(G, S, I, R, r) {
 	if(g in Obj) return
 	ErrV(g, "группа не содержит объектов")
 }
-function doObj(S, f, t, s){
+function doObj(S, f, t, a, s) {
 	if((s = S[obj]) in Obj) return 1
 	for(n in N) if(S[mask] < Obj[n = N[n]][mask] &&
 		and(Obj[n][ip], S[mask]) == S[ip])
-			if(Net[n]) Obj[s][src][n] = Net[n]
-	if(!(s in Obj) && (n = getNet(S[ip], S[mask], a)))
-		Obj[s][dst][s] = Obj[s][src][s] = Net[n]
-	if(s in Obj) { addObj(s, t, S[ip], S[mask], S[cfg]); Obj[s][dst][s] }
+			if(Net[n]) a = Obj[s][src][n] = Net[n]
+	if(!(s in Obj) && (n = getNet(S[ip], S[mask], f)))
+		a = Obj[s][dst][s] = Obj[s][src][s] = Net[n]
+	if(s in Obj) { addObj(s, t, S[ip], S[mask], S[cfg], a); Obj[s][dst][s] }
 	else if(f) return ErrV(S[cfg], "отсутствует подходящая сеть")
 	else return
-	t = s; for(n in Obj[s][src]) if(t && t != Obj[n][acl])
-		if(t == s) t = Obj[n][acl]; else t = ""
-	if(!(Obj[s][acl] = t) || !Obj[t][lan]) Obj[s][lan]
+	a = s; for(n in Obj[s][src]) if(a && a != Obj[n][acl])
+		if(a == s) a = Obj[n][acl]; else a = ""
+	if(!(Obj[s][acl] = a) || !Obj[a][lan]) Obj[s][lan]
 	return 1
 }
 function doRec(e, l, S, D, I, R) {
