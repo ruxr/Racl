@@ -426,14 +426,16 @@ function doRec(e, l, S, D, I, R) {
 		f = $1 " " $2 " " i S[port] " " r D[port]
 		if(f in Rec) return ErrV(f, "уже есть")
 		if((a = I[i]) == R[r]) continue
-		s = Obj[i][lan]; d = Obj[r][lan]
-		if((s && d) || !(s || d)) n = $1 == "deny" ? tail : body
-		else if($1 == "deny") n = body
-		else if((n = s == 2 ? head : tail) == tail) doRecBlk()
+		if(D[fin]) n = head; else {
+			s = Obj[i][lan]; d = Obj[r][lan]
+			if((s && d) || !(s || d)) n = $1 == "deny" ? tail : body
+			else if($1 == "deny") n = body
+			else if((n = s == 2 ? head : tail) == tail) doRecBlk()
+		}
 		addRec(Acl[a][n], f, txt, cur, l)
 	}
 	if(e) for(r in R) if(a = R[r])
-		{ addRec(Acl[a][body], "evaluate " e, auto, 1); doRecBlk() }
+		{ addRec(Acl[a][head], "evaluate " e, auto, 1); doRecBlk() }
 }
 function doRecBlk() {
 	if(!Obj[a][lan]) {
@@ -491,14 +493,16 @@ function getObj(s, t, R, a, S) {
 }
 function getPort(i, S) {
 	if($i == "") return i
-	if($2 == "icmp" && i == 5)
+	if($2 == "icmp" && i == 5) {
+		S[fin] = 1
 		switch($i) {
+		case "echo":	S[fin] = 0
+		case "echo-reply":
 		case "packet-too-big":
 		case "ttl-exceeded":
-		case "unreachable":
-		case "echo-reply":
-		case "echo":	S[port] = " " $i; return ++i
+		case "unreachable":	S[port] = " " $i; return ++i
 		}
+	}
 	switch($i) {
 	case "eq":
 	case "gt":
@@ -516,7 +520,7 @@ function getPort(i, S) {
 		if($(i + 1) < $(i + 2)) return i + 3
 		return ErrV($(++i) " " $(++i), "недопустимый диапазон портов")
 	case "established":
-		S[port] = " " $i
+		S[fin] = 1; S[port] = " " $i
 		if($2 == "tcp" && i == 5) return ++i
 		return ErrV($i, "недопустимое использование")
 	}
