@@ -445,8 +445,9 @@ function doRecBlk() {
 				addRec(Acl[a][tail], dip b " " s, bnet, 1)
 		return
 	}
-	for(b in Obj["*"][dst]) addRec(Acl[a][body], dip b " any", blan, 1)
-	if(i == any) for(b in Bip) addRec(Acl[a][body], dip b " any", bip, 1)
+	for(s in Obj["*"][dst]) if(and(Obj[s][ip], Obj[r][mask]) == Obj[r][ip])
+		addRec(Acl[a][body], dip s " any", blan, 1)
+	if(i == any) for(s in Bip) addRec(Acl[a][body], dip s " any", bip, 1)
 }
 function getIP(s, S, t, n, A, i, m) {
 	if(s == any && !n) {
