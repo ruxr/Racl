@@ -109,9 +109,6 @@ BEGIN {
 	Bad["unreachable"]
 	Bad["echo-reply"]
 	Bad["echo"]
-	# Bip[OBJ]		- массив "плохих" IP
-	Bip["host 0.0.0.0"]
-	Bip["host 255.255.255.255"]
 	# Dev[DEV][DEV] = OBJ	- массив МСЭ
 	# N[№] = NET		- массив сетей в порядке реверсной маски
 	# Net[NET] = ACL	- массив используемых сетей
@@ -390,7 +387,7 @@ function doGrp(G, S, I, R, r) {
 	for(n in I) if(!(Obj[n][lan] || f) || (Obj[n][lan] && f))
 		Obj[g][src][n] = I[n]
 	for(n in R) if(!(Obj[n][lan] || f) || (Obj[n][lan] && f))
-		 Obj[g][dst][n] = R[n]
+		Obj[g][dst][n] = R[n]
 	if(g in Obj) return
 	ErrV(g, "группа не содержит объектов")
 }
@@ -441,13 +438,11 @@ function doRec(e, l, S, D, I, R) {
 function doRecBlk() {
 	if(!Obj[a][lan]) {
 		for(b in Obj[a][dst]) for(s in Obj["*"][dst]) if(s != i &&
-			 and(Obj[s][ip], Obj[r][mask]) == Obj[r][ip])
+			and(Obj[s][ip], Obj[r][mask]) == Obj[r][ip])
 				addRec(Acl[a][tail], dip b " " s, bnet, 1)
-		return
-	}
-	for(s in Obj["*"][dst]) if(and(Obj[s][ip], Obj[r][mask]) == Obj[r][ip])
-		addRec(Acl[a][body], dip s " any", blan, 1)
-	if(i == any) for(s in Bip) addRec(Acl[a][body], dip s " any", bip, 1)
+	} else for(s in Obj["*"][dst])
+		if(and(Obj[s][ip], Obj[r][mask]) == Obj[r][ip])
+			addRec(Acl[a][body], dip s " any", blan, 1)
 }
 function getIP(s, S, t, n, A, i, m) {
 	if(s == any && !n) {
@@ -463,10 +458,8 @@ function getIP(s, S, t, n, A, i, m) {
 	else if(and(i, m = rshift(0xffffffff, A[2])))
 		return ErrV(s, "маска сети должна быть больше")
 	S[ip] = i
-	if(!m) {
-		S[obj] = "host " int2IP(i); S[mask] = 0xffffffff
-		if(S[obj] in Bip) return ErrV(s, "недопустимый IP адрес " t)
-	} else if(m == 0xffffffff) { S[obj] = any; S[mask] = 0 }
+	if(!m) { S[obj] = "host " int2IP(i); S[mask] = 0xffffffff }
+	else if(m == 0xffffffff) { S[obj] = any; S[mask] = 0 }
 	else { S[obj] = int2IP(i) " " int2IP(m); S[mask] = xor(0xffffffff, m) }
 	return S[cfg] = s
 }
