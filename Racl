@@ -73,6 +73,7 @@ BEGIN {
 	out = "/dev/stderr"
 	port = 2	# выбор порта в правиле ACL
 	src = 1		# источник в правиле ACL
+	subj =	"объекта"
 	tab =	"</H3>\n<TABLE BORDER=1 CELLSPACING=0>\n<TR><TH>№<BR>п/п"
 	tail = 4	# завершающие правила ACL
 	### Переменные
@@ -148,7 +149,7 @@ BEGIN {
 	case "def":	ord = chkLan(); doDef(); next
 	case "grp":
 	case "GRP":	ord = chkLan(); doGrp(); next
-	case "add":	if(Allow(t = "сетевой объект")) doAdd(); next
+	case "add":	if(Allow(t = subj)) doAdd(); next
 	case "acl":
 	case "ACL":	if(Allow(t = "ACL")) doAcl(); next
 	case "dev":
@@ -189,9 +190,9 @@ function Acl2Htm(i, S) {
 }
 function Allow(s, f) {
 	switch(s) {
-	case "МСЭ":		if(isarray(Acl)) f = 1
-	case "ACL":		if(isarray(Net)) f = 1
-	case "сетевой объект":	if(isarray(N)) { f = 1; s = "сетевого объекта" }
+	case "МСЭ":	if(isarray(Acl)) f = 1
+	case "ACL":	if(isarray(Net)) f = 1
+	default:	if(isarray(N)) f = 1
 	}
 	return f ? Err("Регистрация " s " запрещена") : 1
 }
@@ -312,7 +313,7 @@ function doAcl() {
 }
 function doAdd(S, n) {
 	if(!getIP($2, S, t)) return
-	if(S[obj] in Obj) return ErrV($2, t " уже зарегистрирован")
+	if(S[obj] in Obj) return ErrV($2, "объект уже зарегистрирован")
 	for(i in Net)
 		if(S[mask] < Obj[i][mask]) {
 			if(and(Obj[i][ip], S[mask]) == S[ip])
@@ -342,7 +343,7 @@ function doAdd(S, n) {
 	} else Obj[n][dst][n] = Obj[n][lan]
 }
 function doDef(S) {
-	if(!getIP($2, S, t = "сетевого объекта") || !Trim(2, t)) return
+	if(!getIP($2, S, t = subj) || !Trim(2, t)) return
 	if(!(S[obj] in Obj)) doObj(S, 1, $0)
 	else if(Obj[S[obj]][desc] == "") Obj[S[obj]][desc] = $0
 	else ErrV(S[cfg], "описание " t " уже задано")
@@ -371,7 +372,7 @@ function doGrp(G, S, I, R, r) {
 			else if(isarray(G)) { r = 1; continue }
 			else return ErrV(g, "удаление из пустого списка")
 		if($i ~ /[a-zA-Z*]/) s = $i
-		else if(getIP($i, S, n = "объекта") && doObj(S, 1)) s = S[obj]
+		else if(getIP($i, S, n = subj) && doObj(S, 1)) s = S[obj]
 		else return
 		if(!(s in Obj)) return ErrV($i, "неизвестная группа")
 		if(s == any) return ErrV($i, "недопустимое использование")
