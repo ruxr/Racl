@@ -198,7 +198,7 @@ function Allow(s, f) {
 }
 function End(s) { Say("! " s); exit 1 }
 function Err(s) { print FILENAME "[" FNR "]: " s >out; if(++err > max) exit 1 }
-function ErrA(s) { ErrV($2, "не может быть " s) }
+function ErrA(n, s) { ErrV(n, "не может быть " s) }
 function ErrD(s) { ErrV(Obj[d][cfg], "IP адрес МСЭ \"" d "\" " s) }
 function ErrN(n, s) { ErrV($2, "есть " s " \"" Obj[n][cfg] "\"") }
 function ErrV(v, s) { Err("\"" v "\" - " s) }
@@ -329,8 +329,8 @@ function doAdd(S, n) {
 	else if(!(a in Acl)) return ErrV(a, "ACL не зарегистрирован")
 	if(!Trim(3, t)) return
 	if(S[obj] == any)
-		if(!a) return ErrA("блоком локальных сетей")
-		else if(!Obj[a][lan]) return ErrA("локальной сетью")
+		if(!a) return ErrA(S[cfg], "блоком локальных сетей")
+		else if(!Obj[a][lan]) return ErrA(S[cfg], "локальной сетью")
 	if(!a && n && Net[n] && !Obj[Net[n]][lan])
 		return ErrN(n, "блок локальных сетей")
 	addObj(n = S[obj], $0, S[ip], S[mask], S[cfg], Net[n] = a)
