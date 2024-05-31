@@ -147,8 +147,7 @@ BEGIN {
 	case ";":	ord = chkLan()
 			txt = Trim(1, "для правил доступа") ? $0 : ""; next
 	case "def":	ord = chkLan(); doDef(); next
-	case "grp":
-	case "GRP":	ord = chkLan(); doGrp(); next
+	case "grp":	ord = chkLan(); doGrp(); next
 	case "add":	if(Allow(t = subj)) doAdd(); next
 	case "acl":
 	case "ACL":	if(Allow(t = "ACL")) doAcl(); next
@@ -361,32 +360,23 @@ function doDev(S) {
 	if(isarray(S)) { Obj[d]; for(n in S) Dev[d][n] = S[n] }
 	else ErrV(d, "пустой список " t)
 }
-function doGrp(G, S, I, R, r) {
-	if(!(g = getName($2, "группы")) || isReg(g)) return
-	f = $1 == "GRP"
+function doGrp(G, S, I, R) {
+	if(!(g = getName($2, t = "группы")) || isReg(g)) return
 	for(i = 2; i++ < NF;) {
-		if($i == "-")
-			if(r) return ErrV(g, "флаг удаления объектов уже задан")
-			else if(isarray(G)) { r = 1; continue }
-			else return ErrV(g, "удаление из пустого списка")
-		if($i ~ /[a-zA-Z*]/) s = $i
-		else if(getIP($i, S, n = subj) && doObj(S, 1)) s = S[obj]
+		if($i !~ /^[0-9]/) {
+			if(!(s = getName($i, t))) return
+			if(!(s in Obj)) return ErrV($i, "неизвестная группа")
+		} else if(getIP($i, S, subj) && doObj(S, 1)) s = S[obj]
 		else return
-		if(!(s in Obj)) return ErrV($i, "неизвестная группа")
 		if(s == any) return ErrV($i, "недопустимое использование")
 		delete S
-		for(n in Obj[s][src])
-			{ S[n]; if(r) delete I[n]; else I[n] = Obj[s][src][n] }
-		for(n in Obj[s][dst])
-			{ S[n]; if(r) delete R[n]; else R[n] = Obj[s][dst][n] }
+		for(n in Obj[s][src]) S[n] = I[n] = Obj[s][src][n]
+		for(n in Obj[s][dst]) S[n] = R[n] = Obj[s][dst][n]
 		for(n in S) if(!(n in G[r])) G[r][n] = s = 0
 		if(s) return ErrV($i, "уже применялся в \"" g "\"")
 	}
-	if(r && !isarray(G[r])) return ErrV(g, "отсутствуют объекты удаления")
-	for(n in I) if(!(Obj[n][lan] || f) || (Obj[n][lan] && f))
-		Obj[g][src][n] = I[n]
-	for(n in R) if(!(Obj[n][lan] || f) || (Obj[n][lan] && f))
-		Obj[g][dst][n] = R[n]
+	for(n in I) Obj[g][src][n] = I[n]
+	for(n in R) Obj[g][dst][n] = R[n]
 	if(g in Obj) return
 	ErrV(g, "группа не содержит объектов")
 }
