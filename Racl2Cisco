@@ -1,7 +1,7 @@
 #!/bin/sh
 H="Скрипт конвертации ACL из формата Racl в формат загрузки конфигурации Cisco
 
-	@(#) Racl2Cisco V3.0 © 2024 by Roman Oreshnikov
+	@(#) Racl2Cisco V5.0 © 2024 by Roman Oreshnikov
 
 	Это бесплатное ПО поставляется без каких-либо ГАРАНТИЙ
 
@@ -35,45 +35,82 @@ shift $(($OPTIND - 1))
 [ $# = 2 ] || End "Неверное число входных параметров!"
 for P do [ -f "$1" -a -r "$1" ] || End "Файл '$1' недоступен!"; done
 gawk -vdir=$RACL_D '
-BEGIN { acl = "ip access-list extended .+"; if(dir == "") dir = "." }
-BEGINFILE { n = 0; f = FILENAME; if(s) d = f; else s = f }
+BEGIN { acl = "ip access-list extended " }
+BEGINFILE { if(s) d = FILENAME; else s = FILENAME }
 {
-	if(i && $0 ~ /^\s*(permit|deny|evaluate)\s+/) A[f][a][++i] = $0
-	else if($0 ~ acl) {
-		if((a = $4) in A[f]) { delete A[f][a]; n = f }
-		A[f][a][i = 1] = $0
-	} else i = 0
-}
-ENDFILE {
-	if(n) {
-		print "Racl2Cisco: Оптимизация " n >"/dev/stderr"
-		close(n)
-		asorti(A[n], L)
-		for(a in L) for(i in A[n][L[a]]) print A[n][L[a]][i] >n
-	}
+	if($1 ~ /pass|drop|evaluate/) {
+		if(d) D[a][++i] = $0; else S[h][a][++i] = $0
+	} else if($1 == "DEV") { f++; delete S[$2] }
+	else if(d) D[a = $2][i = 1] = $0
+	else { delete S[$2][$3]; S[h = $2][a = $3][i = 1] = $0 }
 }
 END {
-	asorti(A[d], L)
-	for(a in L)
-		if((a = L[a]) in A[s]) {
-			n = 0
-			if(length(A[s][a]) != length(A[d][a])) n = 1
-			else for(i in A[s][a])
-				if(A[s][a][i] != A[d][a][i]) { n = 1; break }
-			if(n) Out(A[d][a], "изменен на МСЭ", 1)
-			delete A[s][a]
-		} else Out(A[d][a], "добавлен на МСЭ", 1)
-	asorti(A[s], L)
-	for(a in L) Out(A[s][L[a]], "удален с МСЭ")
-	for(f in F) print "end" >f
+	asorti(S, H)
+	if(f && dir) for(h in H) {
+		asorti(S[h = H[h]], A)
+		for(a in A) for(i in S[h][A[a]]) print S[h][A[a]][i] >s
+	}
+	asorti(D, A)
+	for(a in A) {
+		n = split(D[a = A[a]][1], H)
+		for(s = 2; s++ < n;) {
+			c = (h = H[s]) " " a
+			for(i in D[a]) R[c][i] = D[a][i]
+			R[c][1] = "ACL " c
+			if(h in S && a in S[h]) {
+				if((c = length(D[a])) != length(S[h][a])) c = 0
+				else for(i = 1; i++ < c;)
+					if(D[a][i] != S[h][a][i])
+						{ c = 0; break }
+				if(!c) Out(a, h, "изменен на МСЭ", 1)
+				delete S[h][a]
+			} else Out(a, h, "добавлен на МСЭ", 1)
+		}
+	}
+	asorti(S, H)
+	for(h in H) {
+		asorti(S[H[h]], A); for(a in A) Out(A[a], H[h], "удален с МСЭ")
+	}
+	if(dir) {
+		for(f in F) print "end" >f
+		asorti(R, A)
+		for(a in A) for(i in R[A[a]]) print R[A[a]][i]
+	}
 }
-function Out(L, s, f) {
-	split(L[1], S, "[ /]")
-	print "Racl2Cisco: ACL \"" S[5] "\" " s " \"" S[4] "\"" >"/dev/stderr"
-	if(n) {
-		F[f = dir "/" S[4]]
-		sub(/[^ \/]*\//, "", L[1])
-		L[0] = "no " L[1]
-		for(i in L) print L[i] >f
+function Net(s) {
+	split(s, N, "/")
+	s = rshift(0xffffffff, N[2])
+	return N[1] " " and(rshift(s, 24), 255) "." and(rshift(s, 16), 255) "."\
+                and(rshift(s, 8), 255) "." and(s, 255)
+}
+function Out(a, h, t, s, C) {
+	t = "Racl2Cisco: ACL \"" a "\" " t " \"" h "\""
+	if(!dir) {
+		print t
+		if(s && a in S[h]) {
+			for(i in D[a]) if(i > 1) C[D[a][i]] = int(i)
+			f = "  Удалено:\n\t"
+			for(i in S[h][a])
+				if(S[h][a][i] in C) delete C[S[h][a][i]]
+				else if(i > 1) { print f S[h][a][i]; f = "\t" }
+			f = "  Добавлено:\n\t"
+			asort(C)
+			for(i in C) { print f D[a][C[i]]; f = "\t" }
+		}
+		return
+	}
+	print t >"/dev/stderr"
+	F[f = dir "/" h]
+	print "no " acl a >f
+	if(s) for(i in D[a]) {
+		split(D[a][i], T)
+		for(t in T)
+			if(T[t] == "pass") l = "permit"
+			else if(T[t] == "drop") l = "deny"
+			else if(T[t] ~ /\//) l = l " " Net(T[t])
+			else if(T[t] ~ /\./) l = l " host " T[t]
+			else if(T[t] == "ACL" && t == 1) { l = acl a; break }
+			else l = l " " T[t]
+		print l >f
 	}
 }' "$@"

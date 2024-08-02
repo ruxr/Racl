@@ -1,5 +1,5 @@
 #
-#	@(#) Makefile V3.0 © 2024 by Roman Oreshnikov
+#	@(#) Makefile V5.0 © 2024 by Roman Oreshnikov
 #
 #	Сценарий работ по созданию ACL и их загрузки на МСЭ
 #
@@ -14,12 +14,11 @@ CFG	:= Racl.cfg
 HTM	:= $(WRK)/Racl.htm
 
 # Взаимодействие с МСЭ:
-ADM	:= 192.168.0.1	# IP адрес административного сервера
+ADM	:= 192.168.0.1	# IP-адрес TFTP сервера для доступа с МСЭ
+CMD	:= sh Rsh	# Команда взаимодействия с МСЭ
+DST	:= TFTP.d	# Каталог загрузочных файлов ACL для МСЭ
 EXT	:= .cfg		# Суффикс конфигурационных файлов МСЭ
-DST	:= TFTP.d	# Каталог измененных ACL в иерархии TFTP-сервера
-NEW	:= 		# Каталог измененных ACL относительно корня TFTP-сервера
-#RSH	:= rsh		# Утилита взаимодействия с МСЭ
-RSH	:= sh Rsh
+NEW	:= 		# Имя каталога DST в иерархии TFTP-сервера
 SRC	:= CFG.d	# Каталог конфигурационных файлов МСЭ
 
 ### Ниже изменять на свой риск!
@@ -31,8 +30,6 @@ OLD	:= $(WRK)/Racl.old	# Актуальные ACL из конфигураций 
 UPD	:= $(WRK)/Racl.upd	# Загрузка ACL на МСЭ выполнена
 USE	:= $(WRK)/Racl.use	# Список МСЭ
 
-# Дистрибутивный архив
-TAR	:= Racl-$(shell sed '/@(#)/!d;s/.*V\([0-9.]*\).*/\1/' README).tar.xz
 # Список файлов архива
 LST	:= Makefile README README.md Racl Racl.tst Rchk Cisco2Racl Racl2Cisco\
 		Rsh Racl.cfg Racl.local.cfg Racl.inet1.cfg Racl.inet2.cfg
@@ -45,7 +42,7 @@ acl:	actual $(ACL)
 	echo "*** Выполните 'make install'"; }
 
 actual: $(NOW)
-	@set -e; S=$(strip $(SRC)) E=$(strip $(EXT)) D=$(strip $(OLD));\
+	@set -e; S=$(strip $(SRC)) E=$(strip $(EXT)); D=$(strip $(OLD));\
 	while read N I; do [ $$S/$$N$$E -ot $$D ] || L=$$L\ $$N; done <$(USE);\
 	[ -n "$$L" ] || exit 0;\
 	echo ">>> Выборка ACL из сохраненных конфигураций МСЭ";\
@@ -68,19 +65,20 @@ config:	$(NOW)
 	@echo ">>> Получение текущих конфигураций МСЭ";\
 	E=$(strip $(EXT)); S=$(strip $(SRC));\
 	while read N I; do F=$$S/$$N$$E;\
-		echo "$(strip $(RSH)) $$N \"show running-config\" >$$F";\
-		$(RSH) $$I "show running-config" >$$F~ &&\
+		echo "$(strip $(CMD)) $$N \"show running-config\" >$$F";\
+		$(CMD) $$I "show running-config" >$$F~ &&\
 		mv $$F~ $$F || { rm -f $$F~; exit 1; };\
 	done <$(USE)
 
 diff:	$(ACL)
 	@echo ">>> Различия между актуальными ACL и эталонными";\
-	diff -u $(OLD) $(NOW) || :
+	[ ! -s $(ACL) ] || sh Racl2Cisco $(OLD) $(NOW)
 
 dist:
-	@echo ">>> Создание дистрибутивного архива $(TAR)";\
-	D=$(TAR) D=$${D%.tar*}; mkdir $$D; cp $(LST) $$D;\
-	tar -caf $(TAR) --remove-files $$D
+	@echo ">>> Создание дистрибутивного архива";\
+	N=Racl-$(shell sed '/@(#)/!d;s/.*V\([0-9.]*\).*/\1/' README).tar.xz;\
+	D=$$N D=$${D%.tar*}; mkdir $$D; cp $(LST) $$D;\
+	tar -caf $$N --remove-files $$D
 
 install: $(UPD)
 
@@ -92,7 +90,7 @@ help:
 	echo "clean   - Удалить временные файлы/каталоги";\
 	echo "config  - Получить текущие конфигурации МСЭ";\
 	echo "diff    - Вывести различия активных ACL с вновь построенными";\
-	echo "dist    - Создать дистрибутивный архив: $(TAR)";\
+	echo "dist    - Создать дистрибутивный архив";\
 	echo "install - Загрузить эталонные ACL на соответствующие МСЭ";\
 	echo "help    - Вывести справку по целям";\
 	echo "report  - Получить HTML-отчёт: $(HTM)";\
@@ -110,10 +108,12 @@ test:	$(USE)
 
 $(ACL): $(OLD)
 	@echo ">>> Проверка изменений в ACL"; set -e;\
-	sh Racl2Cisco -d $(DST) $(OLD) $(NOW) && touch $(ACL)
+	D=$(strip $(DST)); while read N I; do rm -f $$D/$$N; done <$(USE);\
+	sh Racl2Cisco -d $(DST) $(OLD) $(NOW) >$(ACL)
 
 $(NOW):	$(USE) $(CFG)
 	@echo ">>> Создание эталонных ACL для текущей конфигурации";\
+	rm -f $(ACL); \
 	sh Racl -l$(USE) -r$(HTM) $(CFG) >$(NOW) || { rm $(NOW); exit 1; }
 
 $(HTM): $(USE) $(CFG)
@@ -125,17 +125,17 @@ $(UPD): $(ACL)
 	A=$(strip $(ADM)) D=$(strip $(DST)) P=$(strip $(NEW)); \
 	while read N I; do F=$$D/$$N; [ -f "$$F" ] || continue;\
 		S="copy tftp://$$A/$${P:+$$P/}$$N running-config";\
-		echo "$(strip $(RSH)) $$N \"$$S\"";\
-		$(RSH) $$I "$$S" && rm $$F;\
-	done <$(USE); cp $(NOW) $(OLD); touch $(ACL) $(UPD)
+		echo "$(strip $(CMD)) $$N \"$$S\"";\
+		$(CMD) $$I "$$S" && rm $$F;\
+	done <$(USE); mv $(ACL) $(OLD); touch $(ACL) $(UPD)
 
 $(USE):
 	@echo ">>> Проверка наличия необходимых каталогов";\
-	for D in WRK/$(WRK) SRC/$(SRC) DST/$(DST); do N=$${D%/*} D=$${D#*/};\
+	for D in WRK/$(WRK) SRC/$(SRC) DST/$(DST); do N=$${D%%/*} D=$${D#*/};\
 		case /$$D/ in\
 		//) echo "!!! $$N - имя каталога не задано"; exit 1;;\
-		*//*|*/-*|*[!0-9A-Za-z.\/_-]*)\
-			echo "!!! '$$D' - недопустимое имя для $$N";\ exit 1;;\
+		/*//*|*/-*|*[!0-9A-Za-z.\/_-]*)\
+			echo "!!! '$$D' - недопустимое имя для $$N"; exit 1;;\
 		/*/*/) [ -d $$D ] && continue;\
 			echo "!!! $$D - каталог отсутствует"; exit 1;;\
 		*) [ -d $$D ] || mkdir $$D || exit 1;;\
