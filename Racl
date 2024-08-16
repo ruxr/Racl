@@ -1,5 +1,5 @@
 #!/bin/sh
-ID='@(#) Racl V5.0 © 2024 by Roman Oreshnikov'
+ID='@(#) Racl V5.1 © 2024 by Roman Oreshnikov'
 H='Скрипт автоматизации ведения ACL
 
 	'$ID'
@@ -153,17 +153,7 @@ END {
 	if(err > lim) End("Слишком много ошибок в исходных данных")
 	if(err || !length(A)) End("Некорректные исходные данные")
 	for(n in W) asorti(W[n], W[n], "by_grp")
-	if(opt) {
-		Say("Оптимизация ACL")
-		for(a in J) { l = length(W[a = J[a]])
-			for(i in W[a]) if(i in W[a] &&
-				(s = W[a][i]) ~ /drop ip/)
-				for(n = i; n++ < l; ) if(n in W[a] &&
-					T[a][s][1] == T[a][d = W[a][n]][1] &&
-					isIn(V[T[a][d][2]], V[T[a][s][2]]))
-						delete W[a][n]
-		}
-	}
+	if(opt) Opt()
 	if(htm != "") Html()
 	if(lst != "") {
 		Say("Вывод списка МСЭ")
@@ -193,11 +183,11 @@ function Acl() {
 }
 function Blk(f) {
 	if(s) { for(d in L) if(isIn(V[r], V[d])) return f }
-	else for(d in L) if(n = isIn(V[i], V[d])) return f
+	else for(d in L) if(isIn(V[i], V[d])) return f
 	for(n in A[a][net]) for(d in L)
-		if(s) { if(isIn(V[d], V[r])) f = Reg(50, "drop ip " n " " d,
-			n, d, "Запрет доступа к локальным адресам", 1)
-		} else if(isIn(V[d], V[i])) f = Reg(50, "drop ip " d " any",
+		if(s) { if(isIn(V[d], V[r])) f = Reg(50, "drop ip any " d,
+			any, d, "Запрет доступа к локальным адресам", 1)
+		} else if(isIn(V[d], V[i])) f = Reg(10, "drop ip " d " any",
 			d, any, "Запрет доступа с локальными адресами", 1)
 	return f ? f : 75
 }
@@ -349,6 +339,20 @@ function Oper(s, R, g, f, S, D) {
 	for(n in D) if(f || V[n][acl]) R[n] = V[n][acl]
 	return isarray(R) ? 1 : Err(s " - отсутствуют подходящие IP для " g)
 }
+function Opt() {
+	Say("Оптимизация ACL")
+	for(a in J) { l = length(W[a = J[a]])
+		for(i in W[a]) if(i in W[a] && (s = W[a][i]) ~ /drop ip/)
+			for(n = i; n++ < l; ) if(n in W[a] &&
+				(T[a][s][1] == T[a][d = W[a][n]][1] ||
+				isIn(V[T[a][d][1]], V[T[a][s][1]])) &&
+				(T[a][s][2] == T[a][d][2] ||
+				isIn(V[T[a][d][2]], V[T[a][s][2]]))) {
+					Say(s " удалило " d)
+					delete W[a][n]
+				}
+	}
+}
 function Port(S) {
 	if($(++f) != "")
 	if(p == "tcp" || p == "udp") switch($f) {
@@ -406,9 +410,9 @@ function Rule(m, l, e, S, D, I, R) {
 		if(t in W[a]) return Err(t " - уже используется")
 		if(c == "drop" || (s = inLan(i)) == (inLan(r) || r in E)) n = 25
 		else n = Blk(25)
-		Reg(l ? l : n, t, i, r, txt, cur)
+		Reg(n, t, i, r, txt, cur)
 	}
-	if(e) for(r in R) if(a = R[r]) Reg(10, "evaluate " e, "Ответчик",
+	if(e) for(r in R) if(a = R[r]) Reg(5, "evaluate " e, "Ответчик",
 		"Инициатор", "Реверсное правило", 1)
 }
 function Say(s) { print "Racl: " s >out }
