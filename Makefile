@@ -113,7 +113,7 @@ $(ACL): $(OLD)
 
 $(NOW):	$(USE) $(CFG)
 	@echo ">>> Создание эталонных ACL для текущей конфигурации";\
-	rm -f $(ACL); \
+	rm -f $(ACL);\
 	sh Racl -l$(USE) -r$(HTM) $(CFG) >$(NOW) || { rm $(NOW); exit 1; }
 
 $(HTM): $(USE) $(CFG)
@@ -122,12 +122,13 @@ $(HTM): $(USE) $(CFG)
 
 $(UPD): $(ACL)
 	@echo ">>> Загрузка измененных ACL"; set -e;\
-	A=$(strip $(ADM)) D=$(strip $(DST)) P=$(strip $(NEW)); \
-	while read N I; do F=$$D/$$N; [ -f "$$F" ] || continue;\
+	A=$(strip $(ADM)) D=$(strip $(DST)) P=$(strip $(NEW));\
+	while read N I; do [ ! -f "$$D/$$N" ] || L="$$L $$I/$$N"; done <$(USE);\
+	while F in $$L; do I=$${F%/*} N=$${F#*/};\
 		S="copy tftp://$$A/$${P:+$$P/}$$N running-config";\
-		echo "$(strip $(CMD)) $$N \"$$S\"";\
+		echo "$(strip $(CMD)) $$I \"$$S\"";\
 		$(CMD) $$I "$$S" && rm $$F;\
-	done <$(USE); mv $(ACL) $(OLD); touch $(ACL) $(UPD)
+	done; mv $(ACL) $(OLD); touch $(ACL) $(UPD)
 
 $(USE):
 	@echo ">>> Проверка наличия необходимых каталогов";\

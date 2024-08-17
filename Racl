@@ -348,7 +348,7 @@ function Opt() {
 				isIn(V[T[a][d][1]], V[T[a][s][1]])) &&
 				(T[a][s][2] == T[a][d][2] ||
 				isIn(V[T[a][d][2]], V[T[a][s][2]]))) {
-					Say(s " удалило " d)
+					Say(a " " s " удалило " d)
 					delete W[a][n]
 				}
 	}
@@ -398,7 +398,7 @@ function Rule(m, l, e, S, D, I, R) {
 		if(c == "drop") return Err($f " - не может использоваться с " c)
 		else if(!(e = chkID($(f + 1), "для " $f))) return
 		else if(e in A) return Err($f e " - имя уже присвоено ACL")
-		else l = " " $(f++) " " $(f++)
+		else D[prt] = D[prt] " " $(f++) " " $(f++)
 	if($f != "") return Err($f " - нераспознанное поле правила")
 	for(i in I) for(r in R) {
 		if(m) a = m
@@ -410,7 +410,7 @@ function Rule(m, l, e, S, D, I, R) {
 		if(t in W[a]) return Err(t " - уже используется")
 		if(c == "drop" || (s = inLan(i)) == (inLan(r) || r in E)) n = 25
 		else n = Blk(25)
-		Reg(n, t, i, r, txt, cur)
+		Reg(l ? l : n, t, i, r, txt, cur)
 	}
 	if(e) for(r in R) if(a = R[r]) Reg(5, "evaluate " e, "Ответчик",
 		"Инициатор", "Реверсное правило", 1)
