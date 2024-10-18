@@ -1,5 +1,5 @@
 #!/bin/sh
-ID='@(#) Racl V5.1 © 2024 by Roman Oreshnikov'
+ID='@(#) Racl V5.2 © 2024 by Roman Oreshnikov'
 H='Скрипт автоматизации ведения ACL
 
 	'$ID'
@@ -341,17 +341,23 @@ function Oper(s, R, g, f, S, D) {
 }
 function Opt() {
 	Say("Оптимизация ACL")
-	for(a in J) { l = length(W[a = J[a]])
-		for(i in W[a]) if(i in W[a] && (s = W[a][i]) ~ /drop ip/)
-			for(n = i; n++ < l; ) if(n in W[a] &&
-				(T[a][s][1] == T[a][d = W[a][n]][1] ||
-				isIn(V[T[a][d][1]], V[T[a][s][1]])) &&
-				(T[a][s][2] == T[a][d][2] ||
-				isIn(V[T[a][d][2]], V[T[a][s][2]]))) {
-					Say(a " " s " удалило " d)
-					delete W[a][n]
-				}
+	for(a in J) {
+		l = length(W[a = J[a]])
+		for(i in W[a])
+			if(!(i in W[a])) continue
+			else if((s = W[a][i]) ~ /drop ip/) OptR(".")
+			else if(s ~ /pass ip/) OptR("pass")
+			else if(s ~ /pass icmp \S+ \S+$/) OptR("pass icmp")
 	}
+}
+function OptR(c) {
+	for(n = i; n++ < l;)
+		if(n in W[a] && W[a][n] ~ c &&
+		(T[a][s][1] == T[a][d = W[a][n]][1] ||
+		isIn(V[T[a][d][1]], V[T[a][s][1]])) &&
+		(T[a][s][2] == T[a][d][2] ||
+		isIn(V[T[a][d][2]], V[T[a][s][2]])))
+			{ Say(a " " s " > " d); delete W[a][n] }
 }
 function Port(S) {
 	if($(++f) != "")
