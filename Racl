@@ -12,7 +12,7 @@ H='Скрипт автоматизации ведения ACL
   -h      Вывод этого текста
   -n      Не выводить построенные ACL
   -l LST  Имя файла для записи списка МСЭ
-  -o      Выполнить оптимизацию ACL
+  -o      Выполнить оптимизацию ACL (с отчетом: -O)
   -r HTM  Имя файла для записи HTML-отчёта
 
 Аргумент:
@@ -31,12 +31,12 @@ RACL_N=
 RACL_L=
 RACL_O=
 RACL_R=
-while getopts hnl:or: P; do
+while getopts hnl:oOr: P; do
 	case $P in
 	h) echo "$H"; exit;;
 	n) Chk "$RACL_N" ""; RACL_N=y;;
 	l) Chk "$RACL_L" $RACL_L; RACL_L=$OPTARG;;
-	o) Chk "$RACL_O" ""; RACL_O=y;;
+	o|O) Chk "$RACL_O" ""; RACL_O=$P;;
 	r) Chk "$RACL_R" $RACL_R; RACL_R=$OPTARG;;
 	?) End "" "'Racl -h' для дополнительной информации"
 	esac
@@ -136,7 +136,7 @@ BEGIN {
 		case 1: if($1 ~ /^[0-9]/) { IP(); next } ++lvl
 			asorti(N, N, "by_msk")
 		case 2: if($1 !~ /^[+-]/) { Grp(); next } ++lvl
-		case 3: if($1 ~ /^[+-]$/) { Acl(); next } ++lvl; Lan()
+		case 3: if($1 ~ /^[+-]$/) { Acl($1 == "+"); next } ++lvl; Lan()
 	}
 	if($0 ~ /(pass|drop) /) Rule()
 	else if($1 ~ /^;/) txt = gensub(/;\s*/, "", 1)
@@ -153,7 +153,17 @@ END {
 	if(err > lim) End("Слишком много ошибок в исходных данных")
 	if(err || !length(A)) End("Некорректные исходные данные")
 	for(n in W) asorti(W[n], W[n], "by_grp")
-	if(opt) Opt()
+	if(opt) {
+		Say("Оптимизация ACL")
+		for(a in J) {
+			l = length(W[a = J[a]])
+			for(i in W[a])
+				if(!(s = W[a][i])) delete W[a][i]
+				else if(s ~ /drop ip/) Opt(".")
+				else if(s ~ /pass ip/) Opt("pass")
+				else if(s ~ /pass icmp \S+ \S+$/) Opt("pass icmp")
+		}
+	}
 	if(htm != "") Html()
 	if(lst != "") {
 		Say("Вывод списка МСЭ")
@@ -170,14 +180,13 @@ END {
 	}
 	Say("Успешное завершение работы")
 }
-function Acl() {
-	i = $1
+function Acl(i) {
 	if(!((a = $2) in A)) return Err(a " - ACL не определен")
 	if(acl in A[a]) return Err(a " - ACL уже зарегистрирован")
 	if(!(n = chkID($3, t = "группы МСЭ"))) return
 	if(!(n in G)) return Err(n " - группа МСЭ не зарегистрирована")
 	if(Cut(3)) {
-		A[a][def] = $0; A[a][acl] = i == "+"
+		A[a][def] = $0; A[a][acl] = i
 		for(d in G[n]) F[d][a] = A[a][dev][d]
 	}
 }
@@ -197,9 +206,9 @@ function Col() {
 	H[p][s] = "<TD" (c > 1 ? " ROWSPAN=" c : "") (s == 5 ? tc : ">") t
 	t = T[n][H[p = i][3]][s]; c = 1
 }
-function Cut(i, s) {
-	s = $1; sub("^(\\s*\\S+){" i "}\\s*", "")
-	return $0 == "" ? Err(s " - Отсутствует описание") : 1
+function Cut(i) {
+	if($(i + 1)) return sub("^(\\s*\\S+){" i "}\\s*", "")
+	Err((i == 3 ? $2 : $1) " - Отсутствует описание")
 }
 function Def(S) {
 	if(!(n = getIP($1, S)) || !Cut(1)) return
@@ -290,6 +299,7 @@ function IP(S, a, l) {
 	V[n][cfg] = S[cfg]; if(V[n][acl] = a) A[a][net][n]
 }
 function Lan() {
+	if(err) exit
 	Say("Проверка сетевой инфраструктуры")
 	if(hdr == "") Err("Отсутствует заголовок")
 	if(!length(N)) End("Нет зарегистрированных сетей")
@@ -339,25 +349,13 @@ function Oper(s, R, g, f, S, D) {
 	for(n in D) if(f || V[n][acl]) R[n] = V[n][acl]
 	return isarray(R) ? 1 : Err(s " - отсутствуют подходящие IP для " g)
 }
-function Opt() {
-	Say("Оптимизация ACL")
-	for(a in J) {
-		l = length(W[a = J[a]])
-		for(i in W[a])
-			if(!(i in W[a])) continue
-			else if((s = W[a][i]) ~ /drop ip/) OptR(".")
-			else if(s ~ /pass ip/) OptR("pass")
-			else if(s ~ /pass icmp \S+ \S+$/) OptR("pass icmp")
-	}
-}
-function OptR(c) {
-	for(n = i; n++ < l;)
-		if(n in W[a] && W[a][n] ~ c &&
+function Opt(c) {
+	for(n = i; n++ < l;) if(W[a][n] ~ c &&
 		(T[a][s][1] == T[a][d = W[a][n]][1] ||
 		isIn(V[T[a][d][1]], V[T[a][s][1]])) &&
 		(T[a][s][2] == T[a][d][2] ||
 		isIn(V[T[a][d][2]], V[T[a][s][2]])))
-			{ Say(a " " s " > " d); delete W[a][n] }
+			{ W[a][n] = ""; if(opt == "O") Say(a " " s " > " d) }
 }
 function Port(S) {
 	if($(++f) != "")
