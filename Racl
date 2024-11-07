@@ -12,7 +12,7 @@ H='Скрипт автоматизации ведения ACL
   -h      Вывод этого текста
   -n      Не выводить построенные ACL
   -l LST  Имя файла для записи списка МСЭ
-  -o      Выполнить оптимизацию ACL (с отчетом: -O)
+  -o      Показать оптимизацию ACL
   -r HTM  Имя файла для записи HTML-отчёта
 
 Аргумент:
@@ -31,12 +31,12 @@ RACL_N=
 RACL_L=
 RACL_O=
 RACL_R=
-while getopts hnl:oOr: P; do
+while getopts hnl:or: P; do
 	case $P in
 	h) echo "$H"; exit;;
 	n) Chk "$RACL_N" ""; RACL_N=y;;
 	l) Chk "$RACL_L" $RACL_L; RACL_L=$OPTARG;;
-	o|O) Chk "$RACL_O" ""; RACL_O=$P;;
+	o) Chk "$RACL_O" ""; RACL_O=$P;;
 	r) Chk "$RACL_R" $RACL_R; RACL_R=$OPTARG;;
 	?) End "" "'Racl -h' для дополнительной информации"
 	esac
@@ -153,16 +153,14 @@ END {
 	if(err > lim) End("Слишком много ошибок в исходных данных")
 	if(err || !length(A)) End("Некорректные исходные данные")
 	for(n in W) asorti(W[n], W[n], "by_grp")
-	if(opt) {
-		Say("Оптимизация ACL")
-		for(a in J) {
-			l = length(W[a = J[a]])
-			for(i in W[a])
-				if(!(s = W[a][i])) delete W[a][i]
-				else if(s ~ /drop ip/) Opt(".")
-				else if(s ~ /pass ip/) Opt("pass")
-				else if(s ~ /pass icmp \S+ \S+$/) Opt("pass icmp")
-		}
+	Say("Оптимизация ACL")
+	for(a in J) {
+		l = length(W[a = J[a]])
+		for(i in W[a])
+			if(!(s = W[a][i])) delete W[a][i]
+			else if(s ~ /drop ip/) Opt(".")
+			else if(s ~ /pass ip/) Opt("pass")
+			else if(s ~ /pass icmp \S+ \S+$/) Opt("pass icmp")
 	}
 	if(htm != "") Html()
 	if(lst != "") {
@@ -355,7 +353,7 @@ function Opt(c) {
 		isIn(V[T[a][d][1]], V[T[a][s][1]])) &&
 		(T[a][s][2] == T[a][d][2] ||
 		isIn(V[T[a][d][2]], V[T[a][s][2]])))
-			{ W[a][n] = ""; if(opt == "O") Say(a " " s " > " d) }
+			{ W[a][n] = ""; if(opt) Say(a " " s " > " d) }
 }
 function Port(S) {
 	if($(++f) != "")
