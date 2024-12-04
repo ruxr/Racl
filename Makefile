@@ -109,7 +109,8 @@ test:	$(USE)
 $(ACL): $(OLD)
 	@echo ">>> Проверка изменений в ACL"; set -e;\
 	D=$(strip $(DST)); while read N I; do rm -f $$D/$$N; done <$(USE);\
-	sh Racl2Cisco -d $(DST) $(OLD) $(NOW) >$(ACL)
+	sh Racl2Cisco -d $(DST) $(OLD) $(NOW) >$(ACL);\
+	! cmp $(ACL) $(OLD) || touch $(UPD)
 
 $(NOW):	$(USE) $(CFG)
 	@echo ">>> Создание эталонных ACL для текущей конфигурации";\
