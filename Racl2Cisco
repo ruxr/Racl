@@ -10,6 +10,7 @@ H="Скрипт конвертации ACL из формата Racl в форм�
 Параметры:
   -d DIR  Каталог для сохранения ACL
   -h      Вывод этого текста
+  -l LST  Файл списка известных МСЭ
 
 Аргументы:
   src - файл Racl с текущими ACL
@@ -24,17 +25,19 @@ Chk() {
 	esac
 }
 RACL_D=
-while getopts d:h P; do
+RACL_L=
+while getopts d:hl: P; do
 	case $P in
 	d) Chk "$RACL_D" RACL_D; RACL_D=$OPTARG;;
 	h) echo "$H"; exit;;
+	l) Chk "$RACL_L" RACL_L; RACL_L=$OPTARG;;
 	?) End "" "'Racl2Cisco -h' для дополнительной информации"
 	esac
 done
 shift $(($OPTIND - 1))
 [ $# = 2 ] || End "Неверное число входных параметров!"
 for P do [ -f "$1" -a -r "$1" ] || End "Файл '$1' недоступен!"; done
-gawk -vdir=$RACL_D '
+gawk -vdir=$RACL_D -vlst=$RACL_L '
 BEGIN { acl = "ip access-list extended " }
 BEGINFILE { if(s) d = FILENAME; else s = FILENAME }
 {
@@ -45,6 +48,7 @@ BEGINFILE { if(s) d = FILENAME; else s = FILENAME }
 	else { delete S[$2][$3]; S[h = $2][a = $3][i = 1] = $0 }
 }
 END {
+	if(lst) { while(getline < lst > 0) L[$1] = $2; close(lst) }
 	asorti(S, H)
 	if(f && dir) for(h in H) {
 		asorti(S[h = H[h]], A)
@@ -99,6 +103,7 @@ function Out(a, h, t, s, C) {
 		}
 		return
 	}
+	if(!(h in L)) return
 	print t >"/dev/stderr"
 	F[f = dir "/" h]
 	print "no " acl a >f
